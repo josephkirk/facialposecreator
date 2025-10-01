@@ -139,7 +139,6 @@ class FacialPoseCreatorUI(QMainWindow):
             try:
                 self.animator = facial_pose_animator.FacialPoseAnimator()
                 print("Facial Pose Animator initialized successfully with Maya integration.")
-                self.log_message("Facial Pose Animator initialized successfully with Maya integration.")
             except Exception as e:
                 self.animator = None
                 error_msg = f"Error initializing animator: {e}"
@@ -189,6 +188,8 @@ class FacialPoseCreatorUI(QMainWindow):
         # Show welcome message
         if not MAYA_AVAILABLE or not self.animator:
             self.log_message("WARNING: Maya not detected. Some features may be unavailable.")
+        else:
+            self.log_message("Facial Pose Animator initialized successfully with Maya integration.")
         
     def create_setup_tab(self):
         """Create the setup tab for initial configuration."""
@@ -876,7 +877,7 @@ def show_ui():
         created_app = True
     
     # Create and show the main window
-    window = FacialPoseCreatorUI()
+    window = FacialPoseCreatorUI(app)
     window.show()
     
     # Only start event loop if we created the QApplication (running standalone)
