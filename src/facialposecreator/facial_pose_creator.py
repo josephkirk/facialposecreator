@@ -45,9 +45,20 @@ except ImportError:
 # Import the facial pose animator module
 try:
     from . import facial_pose_animator
-    MAYA_AVAILABLE = True
-except ImportError:
-    print("Warning: Maya/PyMEL not available. Running in standalone mode.")
+    # Additional check: verify we're actually in Maya
+    try:
+        import maya.cmds as cmds
+        # Check if Maya is actually running (not just imported)
+        cmds.about(version=True)
+        MAYA_AVAILABLE = True
+        print("facial_pose_animator module imported successfully - Maya detected")
+    except Exception as maya_check_error:
+        # Maya commands not available or not running
+        print(f"PyMEL available but Maya not running: {maya_check_error}")
+        MAYA_AVAILABLE = False
+        facial_pose_animator = None
+except ImportError as e:
+    print(f"Warning: Maya/PyMEL not available. Running in standalone mode. Error: {e}")
     MAYA_AVAILABLE = False
     facial_pose_animator = None
 
@@ -127,10 +138,14 @@ class FacialPoseCreatorUI(QMainWindow):
         if MAYA_AVAILABLE and facial_pose_animator:
             try:
                 self.animator = facial_pose_animator.FacialPoseAnimator()
-                self.log_message("Facial Pose Animator initialized successfully.")
+                print("Facial Pose Animator initialized successfully with Maya integration.")
+                self.log_message("Facial Pose Animator initialized successfully with Maya integration.")
             except Exception as e:
                 self.animator = None
-                print(f"Error initializing animator: {e}")
+                error_msg = f"Error initializing animator: {e}"
+                print(error_msg)
+                import traceback
+                traceback.print_exc()
         else:
             self.animator = None
             print("Running in standalone mode without Maya integration.")
@@ -855,15 +870,18 @@ def show_ui():
     """Show the Facial Pose Creator UI."""
     # Check if QApplication instance exists
     app = QApplication.instance()
+    created_app = False
     if app is None:
         app = QApplication(sys.argv)
+        created_app = True
     
     # Create and show the main window
     window = FacialPoseCreatorUI()
     window.show()
     
-    # Only start event loop if running standalone
-    if app is not None and not hasattr(app, '_in_maya'):
+    # Only start event loop if we created the QApplication (running standalone)
+    # If QApplication already existed (e.g., running in Maya), don't start event loop
+    if created_app:
         sys.exit(app.exec_())
     
     return window
