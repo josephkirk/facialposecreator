@@ -1,0 +1,38 @@
+# .dockerignore for facial pose animator tests
+
+# Exclude unnecessary files from Docker context
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Exclude test results and temporary files
+test_results/
+*.log
+*.tmp
+
+# Exclude version control
+.git/
+.gitignore
+
+# Exclude IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Exclude documentation that's not needed in container
+README*.md
+docs/
+
+# Exclude Windows-specific files
+*.bat
+*.ps1
+Thumbs.db
+
+# Exclude build artifacts
+build/
+dist/
+*.egg-info/

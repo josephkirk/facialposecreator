@@ -1,0 +1,15 @@
+# Facial Pose Animator - Python Dependencies for Maya Container
+# Install with: mayapy -m pip install -r requirements.txt
+
+# Main Maya Python API wrapper - required for facial_pose_animator.py
+pymel>=1.2.0
+
+# Testing framework - for running unit tests
+pytest>=6.0.0
+pytest-cov>=3.0.0
+
+# Mocking utilities - for advanced testing scenarios
+mock>=4.0.0
+
+# Additional utilities that might be useful
+six>=1.16.0

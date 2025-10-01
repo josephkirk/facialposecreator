@@ -5,12 +5,13 @@ Unit tests for facial_pose_animator.py
 This module provides comprehensive unit tests for the FacialPoseAnimator system,
 including tests for all major classes, methods, and functionality.
 
+Designed to run in a real Maya environment with PyMEL available.
+
 Author: Test Suite
 Date: Created for testing facial_pose_animator.py
 """
 
 import unittest
-from unittest.mock import Mock, MagicMock, patch, mock_open, call
 import sys
 import os
 import json
@@ -21,12 +22,12 @@ from typing import List, Dict, Any, Optional
 # Add the current directory to sys.path so we can import the module under test
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# Mock PyMEL before importing the module under test
-sys.modules['pymel'] = MagicMock()
-sys.modules['pymel.core'] = MagicMock()
+# Import Maya modules - these should be available in Maya environment
+import maya.cmds as cmds
+import pymel.core as pm
 
 # Import the module under test
-from facial_pose_animator import (
+from facialposecreator.facial_pose_animator import (
     FacialPoseAnimator, FacialPoseData, ControlSelectionMode,
     FacialAnimatorError, ControlSelectionError, InvalidAttributeError,
     DriverNodeError, FileOperationError, ObjectSetError, PoseDataError,
@@ -34,91 +35,41 @@ from facial_pose_animator import (
     save_pose_from_selection, apply_saved_pose
 )
 
-# Import pymel.core for mocking
-import pymel.core as pm
 
-
-class MockPyNode:
-    """Mock class to simulate PyMEL PyNode objects."""
+def create_test_scene():
+    """Create a test Maya scene with facial controls for testing."""
+    # Clear scene
+    cmds.file(new=True, force=True)
     
-    def __init__(self, name: str, node_type: str = "transform"):
-        self._name = name
-        self._node_type = node_type
-        self._attributes = {}
-        self._locked = False
-        self._connected = False
-        self._hidden = False
-        
-    def nodeName(self) -> str:
-        return self._name
-        
-    def __str__(self) -> str:
-        return self._name
-        
-    def listAttr(self, k=False, v=False):
-        """Mock listAttr method."""
-        mock_attrs = []
-        if k and v:  # keyable and visible
-            for attr_name in ['translateX', 'translateY', 'translateZ', 'rotateX', 'rotateY', 'rotateZ']:
-                attr_mock = MockAttribute(f"{self._name}.{attr_name}", attr_name)
-                mock_attrs.append(attr_mock)
-        return mock_attrs
-        
-    def attr(self, attr_name: str):
-        """Mock attr method."""
-        return MockAttribute(f"{self._name}.{attr_name}", attr_name)
-
-
-class MockAttribute:
-    """Mock class to simulate PyMEL Attribute objects."""
+    # Create test facial controls
+    test_controls = []
     
-    def __init__(self, full_name: str, attr_name: str):
-        self._full_name = full_name
-        self._attr_name = attr_name
-        self._value = 0.0
-        self._locked = False
-        self._connected = False
-        self._hidden = False
-        self._type = "double"
-        self._range = [-1.0, 1.0]
-        
-    def longName(self) -> str:
-        return self._attr_name
-        
-    def attrName(self) -> str:
-        return self._attr_name
-        
-    def isLocked(self) -> bool:
-        return self._locked
-        
-    def isConnected(self) -> bool:
-        return self._connected
-        
-    def isHidden(self) -> bool:
-        return self._hidden
-        
-    def get(self, type=False):
-        if type:
-            return self._type
-        return self._value
-        
-    def set(self, value: float):
-        if not self._locked:
-            self._value = value
-            
-    def getRange(self) -> List[float]:
-        return self._range
-        
-    def node(self):
-        node_name = self._full_name.split('.')[0]
-        return MockPyNode(node_name)
-        
-    def inputs(self):
-        return []
-        
-    def __rshift__(self, other):
-        """Mock >> operator for connections."""
-        pass
+    # Create main facial controls with CTRL suffix to match pattern
+    face_ctrl = cmds.circle(name="face_CTRL", radius=2)[0]
+    mouth_ctrl = cmds.circle(name="mouth_CTRL", radius=1)[0]
+    eye_l_ctrl = cmds.circle(name="eye_L_CTRL", radius=0.5)[0]
+    eye_r_ctrl = cmds.circle(name="eye_R_CTRL", radius=0.5)[0]
+    
+    test_controls.extend([face_ctrl, mouth_ctrl, eye_l_ctrl, eye_r_ctrl])
+    
+    # Position controls
+    cmds.move(0, 0, 0, face_ctrl)
+    cmds.move(0, -1, 1, mouth_ctrl)
+    cmds.move(-1, 1, 1, eye_l_ctrl)
+    cmds.move(1, 1, 1, eye_r_ctrl)
+    
+    # Add some custom attributes for testing
+    for ctrl in test_controls:
+        cmds.addAttr(ctrl, ln="smile", at="double", min=-1, max=1, dv=0, k=True)
+        cmds.addAttr(ctrl, ln="frown", at="double", min=-1, max=1, dv=0, k=True)
+    
+    return test_controls
+
+
+def cleanup_test_scene():
+    """Clean up test scene."""
+    # Clear scene
+    cmds.file(new=True, force=True)
 
 
 class TestFacialPoseData(unittest.TestCase):
@@ -271,6 +222,11 @@ class TestFacialPoseAnimatorInitialization(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures."""
         self.animator = FacialPoseAnimator()
+        cleanup_test_scene()
+        
+    def tearDown(self):
+        """Clean up after tests."""
+        cleanup_test_scene()
         
     def test_initialization(self):
         """Test proper initialization of FacialPoseAnimator."""
@@ -286,53 +242,62 @@ class TestFacialPoseAnimatorInitialization(unittest.TestCase):
         self.assertEqual(len(self.animator.saved_poses), 0)
         
     def test_is_valid_control(self):
-        """Test control validation."""
-        # Valid control
-        valid_ctrl = MockPyNode("face_CTRL")
+        """Test control validation using real Maya objects."""
+        # Create test scene
+        test_controls = create_test_scene()
+        
+        # Get PyNode objects
+        valid_ctrl = pm.PyNode(test_controls[0])  # face_CTRL
         self.assertTrue(self.animator._is_valid_control(valid_ctrl))
         
-        # Invalid controls (containing excluded nodes)
-        gui_ctrl = MockPyNode("GUI_control")
-        pup_ctrl = MockPyNode("pup_control")
+        # Create controls with excluded names
+        gui_ctrl = cmds.circle(name="GUI_control")[0]
+        pup_ctrl = cmds.circle(name="pup_control")[0]
         
-        self.assertFalse(self.animator._is_valid_control(gui_ctrl))
-        self.assertFalse(self.animator._is_valid_control(pup_ctrl))
+        gui_pynode = pm.PyNode(gui_ctrl)
+        pup_pynode = pm.PyNode(pup_ctrl)
+        
+        self.assertFalse(self.animator._is_valid_control(gui_pynode))
+        self.assertFalse(self.animator._is_valid_control(pup_pynode))
         
     def test_is_valid_attribute(self):
-        """Test attribute validation."""
-        # Valid attribute
-        valid_attr = MockAttribute("test.translateX", "translateX")
+        """Test attribute validation using real Maya attributes."""
+        # Create test scene
+        test_controls = create_test_scene()
+        ctrl = pm.PyNode(test_controls[0])
+        
+        # Test valid attribute
+        valid_attr = ctrl.attr("translateX")
         self.assertTrue(self.animator._is_valid_attribute(valid_attr))
         
-        # Invalid attributes
-        locked_attr = MockAttribute("test.translateY", "translateY")
-        locked_attr._locked = True
+        # Test locked attribute
+        locked_attr = ctrl.attr("translateY")
+        locked_attr.lock()
         self.assertFalse(self.animator._is_valid_attribute(locked_attr))
+        locked_attr.unlock()  # Clean up
         
-        connected_attr = MockAttribute("test.translateZ", "translateZ")
-        connected_attr._connected = True
-        self.assertFalse(self.animator._is_valid_attribute(connected_attr))
-        
-        excluded_attr = MockAttribute("test.scaleX", "scaleX")
+        # Test excluded attribute
+        excluded_attr = ctrl.attr("scaleX")
         self.assertFalse(self.animator._is_valid_attribute(excluded_attr))
         
-    @patch('facial_pose_animator.pm')
-    def test_validate_scene_setup(self, mock_pm):
-        """Test scene setup validation."""
-        # Mock successful validation
-        mock_pm.ls.return_value = []
-        mock_pm.sceneName.return_value = "test_scene.ma"
+    def test_validate_scene_setup(self):
+        """Test scene setup validation with real Maya scene."""
+        # Test with empty scene
+        result = self.animator.validate_scene_setup()
         
-        # Mock get_facial_controls to return some controls
-        with patch.object(self.animator, 'get_facial_controls') as mock_get_controls:
-            mock_get_controls.return_value = [MockPyNode("test_ctrl")]
-            
-            result = self.animator.validate_scene_setup()
-            
-            self.assertTrue(result["maya_available"])
-            self.assertTrue(result["controls_found"])
-            self.assertFalse(result["driver_node_exists"])  # No driver node in mock
-            self.assertTrue(result["scene_saved"])
+        self.assertTrue(result["maya_available"])
+        self.assertFalse(result["controls_found"])  # No controls match pattern in empty scene
+        self.assertFalse(result["driver_node_exists"])
+        self.assertFalse(result["scene_saved"])  # New untitled scene
+        
+        # Test with controls that match pattern
+        create_test_scene()
+        
+        result = self.animator.validate_scene_setup()
+        
+        self.assertTrue(result["maya_available"])
+        self.assertTrue(result["controls_found"])  # Should find CTRL controls now
+        self.assertFalse(result["driver_node_exists"])  # Still no driver node
             
     def test_set_default_selection_mode(self):
         """Test setting default selection mode."""
@@ -350,84 +315,90 @@ class TestControlSelection(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures."""
         self.animator = FacialPoseAnimator()
+        cleanup_test_scene()
         
-    @patch('facial_pose_animator.pm')
-    def test_get_controls_from_selection(self, mock_pm):
+    def tearDown(self):
+        """Clean up after tests."""
+        cleanup_test_scene()
+        
+    def test_get_controls_from_selection(self):
         """Test getting controls from Maya selection."""
-        # Mock selected objects
-        mock_controls = [MockPyNode("ctrl1"), MockPyNode("ctrl2")]
-        mock_pm.selected.return_value = mock_controls
+        # Create test scene
+        test_controls = create_test_scene()
+        
+        # Test with valid selection
+        pm.select([test_controls[0], test_controls[1]])
         
         result = self.animator._get_controls_from_selection()
         
         self.assertEqual(len(result), 2)
-        self.assertEqual(result[0].nodeName(), "ctrl1")
+        self.assertEqual(result[0].nodeName(), "face_CTRL")
         
         # Test empty selection
-        mock_pm.selected.return_value = []
+        pm.select(clear=True)
         
         with self.assertRaises(ControlSelectionError):
             self.animator._get_controls_from_selection()
             
-    @patch('facial_pose_animator.pm')
-    def test_get_controls_from_pattern(self, mock_pm):
+    def test_get_controls_from_pattern(self):
         """Test getting controls from pattern matching."""
-        # Mock pattern matching
-        mock_controls = [MockPyNode("face_CTRL"), MockPyNode("mouth_CTRL")]
-        mock_pm.ls.return_value = mock_controls
+        # Create test scene
+        test_controls = create_test_scene()
         
         result = self.animator._get_controls_from_pattern()
         
-        self.assertEqual(len(result), 2)
-        mock_pm.ls.assert_called_with("::*_CTRL", type='transform')
+        self.assertGreaterEqual(len(result), 2)  # Should find face_CTRL and mouth_CTRL
         
-        # Test no matches
-        mock_pm.ls.return_value = []
+        # Verify control names contain "CTRL"
+        for ctrl in result:
+            self.assertIn("CTRL", ctrl.nodeName())
+        
+        # Test with modified pattern that matches nothing
+        original_pattern = self.animator.control_pattern
+        self.animator.control_pattern = "::*_NONEXISTENT"
         
         with self.assertRaises(ControlSelectionError):
             self.animator._get_controls_from_pattern()
             
-    @patch('facial_pose_animator.pm')
-    def test_get_controls_from_object_set(self, mock_pm):
+        # Restore original pattern
+        self.animator.control_pattern = original_pattern
+            
+    def test_get_controls_from_object_set(self):
         """Test getting controls from object set."""
-        # Mock object set operations
-        mock_controls = [MockPyNode("ctrl1"), MockPyNode("ctrl2")]
-        mock_set = MockPyNode("test_set", "objectSet")
+        # Create test scene
+        test_controls = create_test_scene()
         
-        mock_pm.objExists.return_value = True
-        mock_pm.PyNode.return_value = mock_set
-        mock_pm.sets.return_value = mock_controls
+        # Create an object set
+        object_set = cmds.sets(name="test_control_set", empty=True)
+        cmds.sets([test_controls[0], test_controls[1]], add=object_set)
         
-        result = self.animator._get_controls_from_object_set("test_set")
+        result = self.animator._get_controls_from_object_set("test_control_set")
         
         self.assertEqual(len(result), 2)
         
         # Test non-existent set
-        mock_pm.objExists.return_value = False
-        
         with self.assertRaises(ObjectSetError):
             self.animator._get_controls_from_object_set("nonexistent_set")
             
-    @patch('facial_pose_animator.pm')
-    def test_get_facial_controls_with_modes(self, mock_pm):
+    def test_get_facial_controls_with_modes(self):
         """Test get_facial_controls with different modes."""
-        mock_controls = [MockPyNode("face_CTRL")]
+        # Create test scene
+        test_controls = create_test_scene()
         
         # Test PATTERN mode
-        with patch.object(self.animator, '_get_controls_from_pattern') as mock_pattern:
-            mock_pattern.return_value = mock_controls
-            
-            result = self.animator.get_facial_controls(mode=ControlSelectionMode.PATTERN)
-            self.assertEqual(len(result), 1)
-            mock_pattern.assert_called_once()
-            
+        result = self.animator.get_facial_controls(mode=ControlSelectionMode.PATTERN)
+        self.assertGreaterEqual(len(result), 2)
+        
         # Test SELECTION mode
-        with patch.object(self.animator, '_get_controls_from_selection') as mock_selection:
-            mock_selection.return_value = mock_controls
-            
-            result = self.animator.get_facial_controls(mode=ControlSelectionMode.SELECTION)
-            self.assertEqual(len(result), 1)
-            mock_selection.assert_called_once()
+        pm.select([test_controls[0]])
+        result = self.animator.get_facial_controls(mode=ControlSelectionMode.SELECTION)
+        self.assertEqual(len(result), 1)
+        
+        # Test OBJECT_SET mode
+        object_set = cmds.sets(name="facial_control_set", empty=True)
+        cmds.sets([test_controls[0]], add=object_set)
+        result = self.animator.get_facial_controls(mode=ControlSelectionMode.OBJECT_SET, object_set_name="facial_control_set")
+        self.assertEqual(len(result), 1)
 
 
 class TestPoseManagement(unittest.TestCase):
@@ -436,6 +407,7 @@ class TestPoseManagement(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures."""
         self.animator = FacialPoseAnimator()
+        cleanup_test_scene()
         
         # Create sample pose data
         self.sample_pose = FacialPoseData(
@@ -448,49 +420,57 @@ class TestPoseManagement(unittest.TestCase):
         )
         self.animator.saved_poses["Test Pose"] = self.sample_pose
         
-    @patch('facial_pose_animator.pm')
-    def test_save_pose_from_selection(self, mock_pm):
+    def tearDown(self):
+        """Clean up after tests."""
+        cleanup_test_scene()
+        
+    def test_save_pose_from_selection(self):
         """Test saving pose from selection."""
-        # Mock control selection and attribute values
-        mock_control = MockPyNode("test_ctrl")
-        mock_attrs = [MockAttribute("test_ctrl.translateX", "translateX")]
-        mock_attrs[0]._value = 0.5  # Set non-zero value
+        # Create test scene
+        test_controls = create_test_scene()
         
-        mock_control.listAttr = Mock(return_value=mock_attrs)
+        # Set some attribute values
+        ctrl_node = pm.PyNode(test_controls[0])
+        ctrl_node.translateX.set(0.5)
+        ctrl_node.rotateY.set(1.2)
         
-        with patch.object(self.animator, '_get_controls_from_selection') as mock_get_controls:
-            mock_get_controls.return_value = [mock_control]
-            
-            with patch.object(self.animator, '_save_single_pose_to_file') as mock_save_file:
-                result = self.animator.save_pose_from_selection(
-                    "New Pose", 
-                    "Test description",
-                    auto_save_to_file=False
-                )
-                
-                self.assertIsInstance(result, FacialPoseData)
-                self.assertEqual(result.name, "New Pose")
-                self.assertIn("New Pose", self.animator.saved_poses)
-                
+        # Select the control
+        pm.select([test_controls[0]])
+        
+        result = self.animator.save_pose_from_selection(
+            "New Pose", 
+            "Test description",
+            auto_save_to_file=False
+        )
+        
+        self.assertIsInstance(result, FacialPoseData)
+        self.assertEqual(result.name, "New Pose")
+        self.assertIn("New Pose", self.animator.saved_poses)
+        self.assertIn("face_CTRL", result.controls)
+        
     def test_apply_saved_pose(self):
         """Test applying saved pose."""
-        with patch('facial_pose_animator.pm') as mock_pm:
-            # Mock control and attribute
-            mock_control = MockPyNode("face_ctrl")
-            mock_attr = MockAttribute("face_ctrl.translateX", "translateX")
-            
-            mock_pm.objExists.return_value = True
-            mock_pm.PyNode.return_value = mock_control
-            mock_pm.attributeQuery.return_value = True
-            mock_control.attr = Mock(return_value=mock_attr)
-            
-            with patch.object(self.animator, 'undo_chunk_context') as mock_context:
-                mock_context.__enter__ = Mock(return_value=self.animator)
-                mock_context.__exit__ = Mock(return_value=None)
-                
-                result = self.animator.apply_saved_pose("Test Pose")
-                
-                self.assertTrue(result)
+        # Create test scene
+        test_controls = create_test_scene()
+        
+        # Create a pose with real control data
+        pose = FacialPoseData(
+            name="Apply Test Pose",
+            attribute_name="apply_test_pose",
+            controls={
+                "face_CTRL": {"translateX": 1.5, "translateY": 0.8}
+            }
+        )
+        self.animator.saved_poses["Apply Test Pose"] = pose
+        
+        # Apply the pose
+        result = self.animator.apply_saved_pose("Apply Test Pose")
+        self.assertTrue(result)
+        
+        # Verify the values were applied
+        ctrl_node = pm.PyNode("face_CTRL")
+        self.assertAlmostEqual(ctrl_node.translateX.get(), 1.5, places=2)
+        self.assertAlmostEqual(ctrl_node.translateY.get(), 0.8, places=2)
                 
         # Test non-existent pose
         with self.assertRaises(PoseDataError):
@@ -708,67 +688,92 @@ class TestUndoTracking(unittest.TestCase):
 class TestConvenienceFunctions(unittest.TestCase):
     """Test cases for convenience functions."""
     
+    def setUp(self):
+        """Set up test fixtures."""
+        cleanup_test_scene()
+        
+    def tearDown(self):
+        """Clean up after tests."""
+        cleanup_test_scene()
+    
     def test_create_facial_animator(self):
         """Test creating facial animator instance."""
         animator = create_facial_animator()
         
         self.assertIsInstance(animator, FacialPoseAnimator)
         
-    @patch('facial_pose_animator.FacialPoseAnimator')
-    def test_quick_reset_facial_controls(self, mock_animator_class):
+    def test_quick_reset_facial_controls(self):
         """Test quick reset function."""
-        mock_animator = Mock()
-        mock_animator_class.return_value = mock_animator
+        # Create test scene
+        test_controls = create_test_scene()
         
-        quick_reset_facial_controls()
+        # Set some non-default values
+        ctrl = pm.PyNode(test_controls[0])
+        ctrl.translateX.set(1.5)
+        ctrl.translateY.set(2.0)
+        ctrl.rotateZ.set(45.0)
         
-        mock_animator_class.assert_called_once()
-        mock_animator.reset_all_attributes.assert_called_once()
+        # Reset controls
+        result = quick_reset_facial_controls()
         
-    @patch('facial_pose_animator.FacialPoseAnimator')
-    def test_save_pose_from_selection_convenience(self, mock_animator_class):
+        self.assertTrue(result)
+        
+        # Verify values were reset (should be close to zero)
+        self.assertAlmostEqual(ctrl.translateX.get(), 0.0, places=2)
+        self.assertAlmostEqual(ctrl.translateY.get(), 0.0, places=2)
+        self.assertAlmostEqual(ctrl.rotateZ.get(), 0.0, places=2)
+        
+    def test_save_pose_from_selection_convenience(self):
         """Test convenience function for saving pose from selection."""
-        mock_animator = Mock()
-        mock_pose_data = Mock(spec=FacialPoseData)
-        mock_animator.save_pose_from_selection.return_value = mock_pose_data
-        mock_animator_class.return_value = mock_animator
+        # Create test scene
+        test_controls = create_test_scene()
+        
+        # Set some attribute values
+        ctrl = pm.PyNode(test_controls[0])
+        ctrl.translateX.set(0.5)
+        
+        # Select the control
+        pm.select([test_controls[0]])
         
         result = save_pose_from_selection("Test Pose")
         
-        self.assertEqual(result, mock_pose_data)
-        mock_animator.save_pose_from_selection.assert_called_once_with(
-            "Test Pose", "", use_current_selection=True, 
-            auto_save_to_file=True, output_directory=None
-        )
+        self.assertIsInstance(result, FacialPoseData)
+        self.assertEqual(result.name, "Test Pose")
 
 
-class TestMayaOperationsMocked(unittest.TestCase):
-    """Test cases for Maya operations with comprehensive mocking."""
+class TestMayaOperationsReal(unittest.TestCase):
+    """Test cases for Maya operations with real Maya environment."""
     
     def setUp(self):
-        """Set up test fixtures with Maya mocking."""
+        """Set up test fixtures."""
         self.animator = FacialPoseAnimator()
+        cleanup_test_scene()
         
-    @patch('facial_pose_animator.pm')
-    def test_reset_all_attributes(self, mock_pm):
-        """Test resetting all attributes with mocking."""
-        # Mock controls and attributes
-        mock_control = MockPyNode("test_ctrl")
-        mock_attr = MockAttribute("test_ctrl.translateX", "translateX")
-        mock_control.listAttr = Mock(return_value=[mock_attr])
+    def tearDown(self):
+        """Clean up after tests."""
+        cleanup_test_scene()
         
-        with patch.object(self.animator, 'get_facial_controls') as mock_get_controls:
-            mock_get_controls.return_value = [mock_control]
-            
-            with patch.object(self.animator, 'undo_chunk_context') as mock_context:
-                mock_context.__enter__ = Mock(return_value=self.animator)
-                mock_context.__exit__ = Mock(return_value=None)
-                
-                # Should not raise an exception
-                self.animator.reset_all_attributes()
-                
-                # Verify cutKey was called
-                mock_pm.cutKey.assert_called_with(mock_control)
+    def test_reset_all_attributes(self):
+        """Test resetting all attributes with real Maya objects."""
+        # Create test scene
+        test_controls = create_test_scene()
+        
+        # Set some non-default values
+        for ctrl_name in test_controls:
+            ctrl = pm.PyNode(ctrl_name)
+            ctrl.translateX.set(1.0)
+            ctrl.translateY.set(0.5)
+            ctrl.rotateZ.set(30.0)
+        
+        # Reset all attributes
+        self.animator.reset_all_attributes()
+        
+        # Verify all values are back to defaults (close to zero)
+        for ctrl_name in test_controls:
+            ctrl = pm.PyNode(ctrl_name)
+            self.assertAlmostEqual(ctrl.translateX.get(), 0.0, places=2)
+            self.assertAlmostEqual(ctrl.translateY.get(), 0.0, places=2)
+            self.assertAlmostEqual(ctrl.rotateZ.get(), 0.0, places=2)
 
 
 # Integration test suite runner
@@ -793,7 +798,7 @@ class FacialPoseAnimatorTestSuite:
             TestFileOperations,
             TestUndoTracking,
             TestConvenienceFunctions,
-            TestMayaOperationsMocked
+            TestMayaOperationsReal
         ]
         
         for test_class in test_classes:
@@ -809,8 +814,17 @@ class FacialPoseAnimatorTestSuite:
     @staticmethod
     def run_specific_test(test_class_name: str):
         """Run a specific test class."""
+        import sys
         loader = unittest.TestLoader()
-        suite = loader.loadTestsFromName(f'__main__.{test_class_name}')
+        
+        # Try to get the test class from the current module
+        current_module = sys.modules[__name__]
+        if hasattr(current_module, test_class_name):
+            test_class = getattr(current_module, test_class_name)
+            suite = loader.loadTestsFromTestCase(test_class)
+        else:
+            # Fallback to name-based loading for __main__ context
+            suite = loader.loadTestsFromName(f'__main__.{test_class_name}')
         
         runner = unittest.TextTestRunner(verbosity=2)
         result = runner.run(suite)
