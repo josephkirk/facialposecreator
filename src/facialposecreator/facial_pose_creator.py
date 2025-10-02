@@ -340,6 +340,40 @@ class FacialPoseCreatorUI(QMainWindow):
         driver_group.setLayout(driver_layout)
         layout.addWidget(driver_group)
         
+        # Auto-Animation Group
+        animation_group = QGroupBox("Auto-Animate Poses")
+        animation_layout = QVBoxLayout()
+        
+        animation_info_label = QLabel(
+            "Automatically animate each control's attributes to their limits,\n"
+            "save as poses, and auto-key each pose as a frame."
+        )
+        animation_info_label.setWordWrap(True)
+        animation_layout.addWidget(animation_info_label)
+        
+        # Output file for pose names (optional)
+        output_layout = QHBoxLayout()
+        output_layout.addWidget(QLabel("Output File (optional):"))
+        self.pose_names_output_edit = QLineEdit()
+        self.pose_names_output_edit.setPlaceholderText("Leave empty or specify path for pose names list")
+        output_layout.addWidget(self.pose_names_output_edit)
+        self.browse_output_btn = QPushButton("Browse")
+        self.browse_output_btn.clicked.connect(self.browse_output_file)
+        output_layout.addWidget(self.browse_output_btn)
+        animation_layout.addLayout(output_layout)
+        
+        # Animate button
+        self.animate_poses_btn = QPushButton("Animate Facial Poses")
+        self.animate_poses_btn.setToolTip(
+            "Automatically animate all facial controls to their attribute limits,\n"
+            "creating keyframes for each pose. Each pose gets its own frame."
+        )
+        self.animate_poses_btn.clicked.connect(self.animate_facial_poses_handler)
+        animation_layout.addWidget(self.animate_poses_btn)
+        
+        animation_group.setLayout(animation_layout)
+        layout.addWidget(animation_group)
+        
         layout.addStretch()
         setup_tab.setLayout(layout)
         self.tabs.addTab(setup_tab, "Setup")
@@ -776,6 +810,87 @@ class FacialPoseCreatorUI(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to create driver: {str(e)}")
             self.log_message(f"ERROR: {str(e)}")
+    
+    def browse_output_file(self):
+        """Browse for output file to save pose names."""
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Select Output File for Pose Names", "", "Text Files (*.txt);;All Files (*)"
+        )
+        if file_path:
+            self.pose_names_output_edit.setText(file_path)
+    
+    def animate_facial_poses_handler(self):
+        """Handler for auto-animating facial poses to their limits."""
+        if not self.animator:
+            QMessageBox.warning(self, "Error", "Animator not initialized. Maya may not be available.")
+            return
+        
+        try:
+            # Get selection mode
+            mode_text = self.selection_mode_combo.currentText()
+            mode_map = {
+                "Pattern": facial_pose_animator.ControlSelectionMode.PATTERN,
+                "Current Selection": facial_pose_animator.ControlSelectionMode.SELECTION,
+                "Object Set": facial_pose_animator.ControlSelectionMode.OBJECT_SET,
+                "Metadata": facial_pose_animator.ControlSelectionMode.METADATA
+            }
+            mode = mode_map.get(mode_text, facial_pose_animator.ControlSelectionMode.PATTERN)
+            
+            # Update animator settings
+            self.animator.control_pattern = self.control_pattern_edit.text()
+            
+            # Get output file path (optional)
+            output_file = self.pose_names_output_edit.text().strip()
+            if not output_file:
+                output_file = None
+            
+            # Show confirmation dialog
+            controls = self.animator.get_facial_controls(
+                mode=mode,
+                object_set_name=self.object_set_edit.text() if self.object_set_edit.text() else None
+            )
+            
+            reply = QMessageBox.question(
+                self,
+                "Confirm Animation",
+                f"This will animate {len(controls)} controls through their attribute limits,\n"
+                f"creating keyframes for each pose. Continue?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            
+            if reply != QMessageBox.Yes:
+                self.log_message("Animation cancelled by user.")
+                return
+            
+            # Animate poses
+            self.log_message("Starting facial pose animation...")
+            self.log_message(f"Using selection mode: {mode_text}")
+            self.statusBar().showMessage("Animating facial poses...")
+            
+            pose_names = self.animator.animate_facial_poses(
+                output_file=output_file,
+                mode=mode,
+                object_set_name=self.object_set_edit.text() if self.object_set_edit.text() else None
+            )
+            
+            # Show success message
+            self.log_message(f"Animation completed! Generated {len(pose_names)} poses.")
+            if output_file:
+                self.log_message(f"Pose names written to: {output_file}")
+            
+            self.statusBar().showMessage("Animation completed successfully.", 5000)
+            QMessageBox.information(
+                self,
+                "Success",
+                f"Successfully animated {len(pose_names)} poses.\n"
+                f"Each pose has been keyed on a separate frame."
+            )
+            
+        except Exception as e:
+            error_msg = f"Failed to animate facial poses: {str(e)}"
+            QMessageBox.critical(self, "Error", error_msg)
+            self.log_message(f"ERROR: {error_msg}")
+            self.statusBar().showMessage("Animation failed.", 5000)
     
     def save_pose(self):
         """Save a pose from current state."""

@@ -377,10 +377,27 @@ class FacialPoseAnimator:
         # Check if it's a transform attribute with limits
         for limit_attr, limit_func in self.limit_type_map.items():
             if limit_attr in attr_name:
-                return limit_func(control)
+                result = limit_func(control)
+                # Filter out None values from transform limits
+                if result:
+                    filtered_result = [v for v in result if v is not None]
+                    if filtered_result:
+                        logger.debug(f"Using transform limits for {attr_name}: {filtered_result}")
+                        return filtered_result
+                    else:
+                        logger.debug(f"Transform limits returned None values for {attr_name}, falling back to attribute range")
         
         # Default to attribute's range
-        return attribute.getRange()
+        attr_range = attribute.getRange()
+        # Filter out None values from attribute range
+        if attr_range:
+            filtered_range = [v for v in attr_range if v is not None]
+            if filtered_range:
+                return filtered_range
+        
+        # Ultimate fallback - return empty list if no valid range found
+        logger.warning(f"No valid range found for {attr_name}, returning empty list")
+        return []
 
     
     def _generate_pose_name(self, control: pm.PyNode, attribute: pm.Attribute, value: float) -> str:
@@ -1088,7 +1105,7 @@ class FacialPoseAnimator:
             
             # Animate through each value in range
             for value in value_range:
-                if abs(value) < self.tolerance:  # Skip near-zero values
+                if value is None or abs(value) < self.tolerance:  # Skip None and near-zero values
                     continue
                     
                 self.last_key_time += 1
@@ -1196,7 +1213,7 @@ class FacialPoseAnimator:
         created_count = 0
         
         for value in value_range:
-            if abs(value) < self.tolerance or value is None:
+            if value is None or abs(value) < self.tolerance:
                 continue
             
             pose_name = self._generate_pose_name(control, attribute, value)
