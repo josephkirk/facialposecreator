@@ -209,6 +209,10 @@ class FacialPoseCreatorUI(QMainWindow):
         # Load current settings from animator
         self.load_settings_from_animator()
         
+        # Update driver status display
+        if MAYA_AVAILABLE and self.animator:
+            QTimer.singleShot(100, self.update_driver_status_display)  # Delayed call to ensure UI is ready
+        
     def load_settings_from_animator(self):
         """Load current settings from the animator into the UI."""
         if not self.animator:
@@ -325,10 +329,37 @@ class FacialPoseCreatorUI(QMainWindow):
         driver_group = QGroupBox("Driver Node Setup")
         driver_layout = QVBoxLayout()
         
+        # Current driver status display
+        status_layout = QVBoxLayout()
+        status_header = QLabel("<b>Current Driver Status:</b>")
+        status_layout.addWidget(status_header)
+        
+        self.driver_status_label = QLabel("No driver node found")
+        self.driver_status_label.setStyleSheet("color: gray; padding: 5px;")
+        self.driver_status_label.setWordWrap(True)
+        status_layout.addWidget(self.driver_status_label)
+        
+        # Refresh button for driver status
+        refresh_layout = QHBoxLayout()
+        self.refresh_driver_status_btn = QPushButton("Refresh Driver Status")
+        self.refresh_driver_status_btn.clicked.connect(self.update_driver_status_display)
+        self.refresh_driver_status_btn.setMaximumWidth(150)
+        refresh_layout.addWidget(self.refresh_driver_status_btn)
+        refresh_layout.addStretch()
+        status_layout.addLayout(refresh_layout)
+        
+        driver_layout.addLayout(status_layout)
+        
+        # Separator
+        separator = QLabel()
+        separator.setFrameStyle(QLabel.HLine | QLabel.Sunken)
+        driver_layout.addWidget(separator)
+        
         # Driver node name
         driver_name_layout = QHBoxLayout()
         driver_name_layout.addWidget(QLabel("Driver Node Name:"))
         self.driver_name_edit = QLineEdit("FacialPoseValue")
+        self.driver_name_edit.textChanged.connect(self.on_driver_name_changed)
         driver_name_layout.addWidget(self.driver_name_edit)
         driver_layout.addLayout(driver_name_layout)
         
@@ -804,12 +835,15 @@ class FacialPoseCreatorUI(QMainWindow):
             
             if result:
                 self.log_message(f"Created facial pose driver: {driver_name}")
+                self.update_driver_status_display()  # Refresh driver status
                 QMessageBox.information(self, "Success", f"Created driver node: {driver_name}")
             else:
                 self.log_message("Failed to create driver node.")
+                self.update_driver_status_display()  # Refresh even on failure
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to create driver: {str(e)}")
             self.log_message(f"ERROR: {str(e)}")
+            self.update_driver_status_display()  # Refresh to show current state
     
     def browse_output_file(self):
         """Browse for output file to save pose names."""
@@ -818,6 +852,95 @@ class FacialPoseCreatorUI(QMainWindow):
         )
         if file_path:
             self.pose_names_output_edit.setText(file_path)
+    
+    def on_driver_name_changed(self, text):
+        """Handle driver name text changes."""
+        # Update animator's driver node name
+        if self.animator:
+            self.animator.facial_driver_node = text
+        # Debounce the status update to avoid too many refreshes while typing
+        if hasattr(self, '_driver_name_timer'):
+            self._driver_name_timer.stop()
+        self._driver_name_timer = QTimer()
+        self._driver_name_timer.setSingleShot(True)
+        self._driver_name_timer.timeout.connect(self.update_driver_status_display)
+        self._driver_name_timer.start(500)  # Wait 500ms after last keystroke
+    
+    def update_driver_status_display(self):
+        """Update the driver node status display in the UI."""
+        if not self.animator:
+            self.driver_status_label.setText("❌ Animator not initialized")
+            self.driver_status_label.setStyleSheet("color: red; padding: 5px; background-color: #ffe6e6;")
+            return
+        
+        try:
+            driver_name = self.driver_name_edit.text()
+            
+            # Use animator's method to get driver pose attributes
+            # This will handle driver node existence check internally
+            try:
+                pose_info_list = self.animator._get_driver_pose_attributes()
+                num_poses = len(pose_info_list)
+                
+                # Import PyMEL only when we know driver exists to get the driver node
+                import pymel.core as pm
+                driver_nodes = pm.ls(driver_name)
+                if driver_nodes:
+                    driver_node = driver_nodes[0]
+                    
+                    # Get connected controls via metadata
+                    connected_controls = self.animator._get_connected_facial_controls(driver_node)
+                    num_controls = len(connected_controls)
+                    
+                    # Build status message
+                    status_text = f"✅ Driver: <b>{driver_name}</b><br>"
+                    status_text += f"📊 Poses: {num_poses}<br>"
+                    status_text += f"🎭 Controls: {num_controls}"
+                    
+                    self.driver_status_label.setText(status_text)
+                    self.driver_status_label.setStyleSheet(
+                        "color: green; padding: 5px; background-color: #e6ffe6; border-left: 3px solid green;"
+                    )
+                    
+                    self.log_message(f"Driver status updated: {driver_name} ({num_poses} poses, {num_controls} controls)")
+                else:
+                    # Shouldn't reach here, but handle just in case
+                    raise Exception("Driver node lookup failed after successful pose query")
+                    
+            except Exception as e:
+                # Check if this is a "not found" error from _get_driver_pose_attributes
+                error_msg = str(e).lower()
+                if "not found" in error_msg or "no driver node" in error_msg:
+                    # Driver doesn't exist
+                    status_text = f"❌ Driver: <b>{driver_name}</b><br>"
+                    status_text += "Status: Not found in scene<br>"
+                    status_text += "💡 Create driver using button below"
+                    
+                    self.driver_status_label.setText(status_text)
+                    self.driver_status_label.setStyleSheet(
+                        "color: gray; padding: 5px; background-color: #f5f5f5; border-left: 3px solid gray;"
+                    )
+                    self.log_message(f"Driver node '{driver_name}' not found in scene.")
+                else:
+                    # Driver exists but has issues
+                    status_text = f"⚠️ Driver: <b>{driver_name}</b><br>"
+                    status_text += f"Status: Found but may have issues<br>"
+                    status_text += f"Error: {str(e)[:50]}..."
+                    
+                    self.driver_status_label.setText(status_text)
+                    self.driver_status_label.setStyleSheet(
+                        "color: orange; padding: 5px; background-color: #fff4e6; border-left: 3px solid orange;"
+                    )
+                    self.log_message(f"Warning: Driver node exists but has issues: {e}")
+                
+        except ImportError:
+            self.driver_status_label.setText("❌ PyMEL not available")
+            self.driver_status_label.setStyleSheet("color: red; padding: 5px; background-color: #ffe6e6;")
+            self.log_message("Cannot check driver status: PyMEL not available")
+        except Exception as e:
+            self.driver_status_label.setText(f"❌ Error checking status: {str(e)[:50]}")
+            self.driver_status_label.setStyleSheet("color: red; padding: 5px; background-color: #ffe6e6;")
+            self.log_message(f"Error updating driver status: {e}")
     
     def animate_facial_poses_handler(self):
         """Handler for auto-animating facial poses to their limits."""
@@ -878,6 +1001,7 @@ class FacialPoseCreatorUI(QMainWindow):
             if output_file:
                 self.log_message(f"Pose names written to: {output_file}")
             
+            self.update_driver_status_display()  # Refresh driver status after animation
             self.statusBar().showMessage("Animation completed successfully.", 5000)
             QMessageBox.information(
                 self,
@@ -890,6 +1014,7 @@ class FacialPoseCreatorUI(QMainWindow):
             error_msg = f"Failed to animate facial poses: {str(e)}"
             QMessageBox.critical(self, "Error", error_msg)
             self.log_message(f"ERROR: {error_msg}")
+            self.update_driver_status_display()  # Refresh even on failure
             self.statusBar().showMessage("Animation failed.", 5000)
     
     def save_pose(self):

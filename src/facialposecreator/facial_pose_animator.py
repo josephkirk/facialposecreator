@@ -161,6 +161,9 @@ class FacialPoseAnimator:
         self.saved_poses: Dict[str, FacialPoseData] = {}
         self.pose_storage_file: Optional[str] = None
         
+        # Animation tracking
+        self.last_frame_to_pose_map: Dict[int, Any] = {}  # Maps frame numbers to pose information
+        
         # Mapping for transform limit queries
         self.limit_type_map = {
             "translateX": lambda x: pm.transformLimits(x, tx=1, q=1),
@@ -417,6 +420,89 @@ class FacialPoseAnimator:
         value_str = str(value).replace(".", 'f').replace("-", "minus")
         
         return f"{control_name}_{attr_name}_{value_str}"
+    
+    def _get_driver_pose_attributes(self, driver_node: Optional[pm.PyNode] = None) -> List[Dict[str, Any]]:
+        """
+        Get all pose attributes from the driver node with their connection information.
+        
+        Args:
+            driver_node: The facial pose driver node (uses default if None)
+            
+        Returns:
+            List[Dict[str, Any]]: List of dictionaries containing:
+                - pose_attr: The driver node pose attribute
+                - control_attr: The connected control attribute
+                - pose_name: Name of the pose
+                - value: The target value for the pose
+                
+        Raises:
+            DriverNodeError: If driver node doesn't exist or has no pose attributes
+        """
+        # Get or validate driver node
+        if driver_node is None:
+            try:
+                driver_nodes = pm.ls(self.facial_driver_node)
+                if not driver_nodes:
+                    raise DriverNodeError(f"No driver node '{self.facial_driver_node}' found in scene.")
+                driver_node = driver_nodes[0]
+            except pm.MayaNodeError as e:
+                raise DriverNodeError(f"Error accessing driver node '{self.facial_driver_node}': {e}") from e
+        
+        pose_info_list = []
+        
+        # Get all keyable attributes that have animation curve connections
+        pose_attributes = [attr for attr in driver_node.listAttr(k=True) if attr.inputs()]
+        
+        if not pose_attributes:
+            logger.warning(f"Driver node '{driver_node}' has no pose attributes with connections.")
+            return pose_info_list
+        
+        for pose_attr in pose_attributes:
+            try:
+                # Get the animation curve connected to this pose attribute
+                anim_curves = pose_attr.inputs()
+                if not anim_curves:
+                    continue
+                
+                anim_curve = anim_curves[0]
+                
+                # Get the control attribute connected to the animation curve input
+                input_connections = anim_curve.inputs(p=True)
+                if not input_connections:
+                    logger.warning(f"Pose attribute '{pose_attr.longName()}' has no input connection.")
+                    continue
+                
+                control_attr = input_connections[0]
+                
+                # Skip locked attributes
+                if control_attr.isLocked():
+                    logger.debug(f"Skipping locked attribute: {control_attr}")
+                    continue
+                
+                # Extract value from pose attribute name
+                # Format: controlName_attributeName_value
+                pose_name = pose_attr.longName()
+                value_str = pose_name.split("_")[-1]
+                
+                try:
+                    value = float(value_str.replace("minus", "-").replace("f", "."))
+                except ValueError:
+                    logger.warning(f"Could not parse value from pose name '{pose_name}'")
+                    continue
+                
+                pose_info_list.append({
+                    'pose_attr': pose_attr,
+                    'control_attr': control_attr,
+                    'pose_name': pose_name,
+                    'value': value
+                })
+                
+            except Exception as e:
+                logger.warning(f"Error processing pose attribute {pose_attr.longName()}: {e}")
+                continue
+        
+        logger.info(f"Found {len(pose_info_list)} valid pose attributes in driver node.")
+        return pose_info_list
     
     def _create_metadata_connections(self, driver_node: pm.PyNode, control_nodes: List[pm.PyNode]) -> None:
         """
@@ -1026,61 +1112,151 @@ class FacialPoseAnimator:
                             output_file: Optional[str] = None,
                             mode: Optional[ControlSelectionMode] = None,
                             object_set_name: Optional[str] = None,
-                            use_selection: bool = False) -> List[str]:
+                            use_selection: bool = False,
+                            driver_node: Optional[pm.PyNode] = None) -> List[str]:
         """
-        Create animation keyframes for all facial poses.
+        Create animation keyframes for all facial poses using the driver node.
+        
+        This method uses the pose attributes already connected to the driver node,
+        ensuring consistency with the driver setup. If the driver node doesn't exist,
+        it will be created automatically.
         
         Args:
             output_file: Optional path to write pose names
-            mode: Selection mode (PATTERN, SELECTION, or OBJECT_SET)
+            mode: Selection mode (PATTERN, SELECTION, OBJECT_SET, or METADATA) - used if driver needs to be created
             object_set_name: Name of Maya object set to use (when mode is OBJECT_SET)
             use_selection: Legacy parameter for backward compatibility
+            driver_node: Optional driver node to use (creates/finds default if None)
             
         Returns:
             List[str]: List of generated pose names
             
         Raises:
-            ControlSelectionError: If no valid controls found
+            ControlSelectionError: If no valid controls found when creating driver
+            DriverNodeError: If driver node doesn't exist and can't be created
             InvalidAttributeError: If animation fails
             FileOperationError: If output file cannot be written
         """
         with self.undo_chunk_context("Animate Facial Poses"):
-            logger.info("Starting facial pose animation...")
+            logger.info("Starting facial pose animation using driver node...")
+            
+            # Get or create driver node
+            if driver_node is None:
+                try:
+                    driver_nodes = pm.ls(self.facial_driver_node)
+                    if not driver_nodes:
+                        logger.info("Driver node not found. Creating driver node...")
+                        driver_node = self.create_facial_pose_driver(
+                            mode=mode, 
+                            object_set_name=object_set_name, 
+                            use_selection=use_selection
+                        )
+                    else:
+                        driver_node = driver_nodes[0]
+                        logger.info(f"Using existing driver node: {driver_node}")
+                except Exception as e:
+                    raise DriverNodeError(f"Failed to get or create driver node: {e}") from e
+            
+            # Get all pose attributes from driver node
+            pose_info_list = self._get_driver_pose_attributes(driver_node)
+            
+            if not pose_info_list:
+                raise InvalidAttributeError(
+                    f"No pose attributes found in driver node '{driver_node}'. "
+                    "Please create the driver node first using 'Create Facial Pose Driver'."
+                )
             
             self.last_key_time = 0
             pose_names = []
-            controls = self.get_facial_controls(mode=mode, object_set_name=object_set_name, use_selection=use_selection)
-            
             animation_errors = []
-            for control in controls:
-                for attr in control.listAttr(k=True, v=True):
-                    if not self._is_valid_attribute(attr):
-                        continue
+            
+            # Mapping to track frame -> pose attribute correspondence
+            frame_to_pose_map = {}
+            
+            # Animate each pose using the driver node connections
+            for pose_info in pose_info_list:
+                try:
+                    control_attr = pose_info['control_attr']
+                    value = pose_info['value']
+                    pose_name = pose_info['pose_name']
                     
-                    try:
-                        attr_range = self._get_attribute_range(control, attr)
-                        control_poses = self._animate_attribute(attr, attr_range)
-                        pose_names.extend(control_poses)
-                        
-                    except Exception as e:
-                        animation_errors.append(f"Error animating attribute {attr}: {e}")
+                    # Set to zero at start
+                    if self.last_key_time == 0:
+                        self.last_key_time -= 1
+                        control_attr.set(0)
+                        pm.setKeyframe(control_attr, time=self.last_key_time)
+                        frame_to_pose_map[self.last_key_time] = "NEUTRAL_START"
+                    
+                    # Set to target value
+                    self.last_key_time += 1
+                    control_attr.set(value)
+                    pm.setKeyframe(control_attr, time=self.last_key_time)
+                    
+                    # Track frame to pose mapping
+                    frame_to_pose_map[self.last_key_time] = {
+                        'pose_name': pose_name,
+                        'control_attr': str(control_attr),
+                        'value': value,
+                        'pose_attr': str(pose_info['pose_attr'])
+                    }
+                    
+                    pose_names.append(pose_name)
+                    logger.debug(f"Animated pose: {pose_name} at time {self.last_key_time}")
+                    
+                except Exception as e:
+                    error_msg = f"Error animating pose {pose_info.get('pose_name', 'unknown')}: {e}"
+                    animation_errors.append(error_msg)
+                    logger.warning(error_msg)
+            
+            # Return all attributes to zero at the end
+            if pose_names:
+                try:
+                    self.last_key_time += 1
+                    for pose_info in pose_info_list:
+                        control_attr = pose_info['control_attr']
+                        if not control_attr.isLocked():
+                            control_attr.set(0)
+                            pm.setKeyframe(control_attr, time=self.last_key_time)
+                    frame_to_pose_map[self.last_key_time] = "NEUTRAL_END"
+                except Exception as e:
+                    logger.warning(f"Error setting final zero keyframes: {e}")
             
             if not pose_names:
                 raise InvalidAttributeError("No poses were successfully animated.")
             
             if animation_errors:
-                logger.warning(f"Some animations failed: {'; '.join(animation_errors[:3])}")
+                logger.warning(f"Some animations failed ({len(animation_errors)} errors): {'; '.join(animation_errors[:3])}")
+            
+            # Log frame to pose mapping summary
+            logger.info("Frame to Pose Mapping:")
+            for frame in sorted(frame_to_pose_map.keys()):
+                pose_data = frame_to_pose_map[frame]
+                if isinstance(pose_data, str):
+                    logger.info(f"  Frame {frame}: {pose_data}")
+                else:
+                    logger.info(f"  Frame {frame}: {pose_data['pose_name']} ({pose_data['control_attr']} = {pose_data['value']})")
             
             # Write pose names to file if specified
             if output_file:
                 self._write_pose_names(pose_names, output_file)
+                
+                # Also write frame mapping to a companion file
+                mapping_file = output_file.rsplit('.', 1)[0] + '_frame_mapping.txt'
+                self._write_frame_mapping(frame_to_pose_map, mapping_file)
             
-            logger.info(f"Animation completed. Generated {len(pose_names)} poses.")
+            # Store the frame mapping as instance variable for access by UI or other methods
+            self.last_frame_to_pose_map = frame_to_pose_map
+            
+            logger.info(f"Animation completed. Generated {len(pose_names)} poses from driver node.")
             return pose_names
     
     def _animate_attribute(self, attribute: pm.Attribute, value_range: List[float]) -> List[str]:
         """
         Animate a single attribute through its value range.
+        
+        .. deprecated::
+            This method is deprecated. Use animate_facial_poses() which leverages
+            the driver node structure for consistent behavior.
         
         Args:
             attribute: The attribute to animate
@@ -1092,6 +1268,8 @@ class FacialPoseAnimator:
         Raises:
             InvalidAttributeError: If attribute cannot be animated
         """
+        logger.warning("_animate_attribute is deprecated. Consider using animate_facial_poses() instead.")
+        
         if not self._is_valid_attribute(attribute):
             raise InvalidAttributeError(f"Attribute {attribute.longName()} is not valid for animation (locked, connected, or wrong type).")
         
@@ -1316,74 +1494,53 @@ class FacialPoseAnimator:
             
             logger.info(f"Connected {connection_count} attributes to root node.")
     
-    def animate_existing_poses(self, output_file: Optional[str] = None) -> List[str]:
+    def animate_existing_poses(self, output_file: Optional[str] = None, driver_node: Optional[pm.PyNode] = None) -> List[str]:
         """
         Animate poses from existing facial driver node.
         
+        This method is now a convenience wrapper that calls animate_facial_poses
+        with the driver node approach, maintaining backwards compatibility.
+        
         Args:
             output_file: Optional path to write pose names
+            driver_node: Optional driver node to use (finds default if None)
             
         Returns:
             List[str]: List of animated pose names
-        """
-        logger.info("Animating existing poses...")
-        
-        try:
-            driver_nodes = pm.ls(f"::*{self.facial_driver_node}")
-            if not driver_nodes:
-                raise DriverNodeError(f"No driver node '{self.facial_driver_node}' found in scene.")
             
-            driver_node = driver_nodes[0]
-        except pm.MayaNodeError as e:
-            raise DriverNodeError(f"Error accessing driver node '{self.facial_driver_node}': {e}") from e
+        Raises:
+            DriverNodeError: If driver node doesn't exist
+        """
+        logger.info("Animating existing poses using driver node...")
         
-        poses = []
-        key_time = 1
-        
-        # Get all keyable attributes with inputs
-        pose_attributes = [attr for attr in driver_node.listAttr(k=True) if attr.inputs()]
-        
-        for attr in pose_attributes:
+        # Get driver node
+        if driver_node is None:
             try:
-                # Get the connected input attribute
-                input_connections = attr.inputs()[0].inputs(p=True)
-                if not input_connections:
-                    continue
-                
-                input_attr = input_connections[0]
-                
-                if input_attr.isLocked():
-                    continue
-                
-                # Extract value from attribute name
-                value_str = attr.longName().split("_")[-1]
-                value = float(value_str.replace("minus", "-").replace("f", "."))
-                
-                poses.append(attr.longName())
-                
-                # Animate the attribute
-                self._animate_pose_attribute(input_attr, value, key_time)
-                key_time += 1
-                
-            except Exception as e:
-                logger.warning(f"Error animating pose {attr.longName()}: {e}")
+                driver_nodes = pm.ls(self.facial_driver_node)
+                if not driver_nodes:
+                    raise DriverNodeError(f"No driver node '{self.facial_driver_node}' found in scene.")
+                driver_node = driver_nodes[0]
+            except pm.MayaNodeError as e:
+                raise DriverNodeError(f"Error accessing driver node '{self.facial_driver_node}': {e}") from e
         
-        # Write pose names to file if specified
-        if output_file:
-            self._write_pose_names(poses, output_file)
-        
-        logger.info(f"Animated {len(poses)} existing poses.")
-        return poses
+        # Use the unified animate_facial_poses method
+        return self.animate_facial_poses(output_file=output_file, driver_node=driver_node)
     
     def _animate_pose_attribute(self, attribute: pm.Attribute, value: float, key_time: int) -> None:
         """
         Animate a single pose attribute.
+        
+        .. deprecated::
+            This method is deprecated and no longer used. The animation logic
+            is now integrated into animate_facial_poses().
         
         Args:
             attribute: The attribute to animate
             value: The target value
             key_time: The keyframe time
         """
+        logger.warning("_animate_pose_attribute is deprecated and should not be called directly.")
+        
         # Set initial state
         attribute.set(0)
         
@@ -1426,6 +1583,52 @@ class FacialPoseAnimator:
         except (OSError, IOError, PermissionError) as e:
             raise FileOperationError(f"Failed to write pose names to file '{output_file}': {e}") from e
     
+    def _write_frame_mapping(self, frame_to_pose_map: Dict[int, Any], output_file: str) -> None:
+        """
+        Write frame to pose mapping to a file.
+        
+        Args:
+            frame_to_pose_map: Dictionary mapping frame numbers to pose information
+            output_file: Path to the output file
+            
+        Raises:
+            FileOperationError: If file cannot be written
+        """
+        if not frame_to_pose_map:
+            logger.warning("Frame to pose mapping is empty, skipping file write.")
+            return
+        
+        try:
+            # Create directory if it doesn't exist
+            output_dir = os.path.dirname(output_file)
+            if output_dir and not os.path.exists(output_dir):
+                os.makedirs(output_dir)
+            
+            with open(output_file, "w") as f:
+                f.write("# Frame to Pose Mapping\n")
+                f.write("# Format: Frame | Pose Name | Control Attribute | Value | Pose Attribute\n")
+                f.write("=" * 80 + "\n\n")
+                
+                for frame in sorted(frame_to_pose_map.keys()):
+                    pose_data = frame_to_pose_map[frame]
+                    
+                    if isinstance(pose_data, str):
+                        # Special markers like NEUTRAL_START or NEUTRAL_END
+                        f.write(f"Frame {frame:4d} | {pose_data}\n")
+                    else:
+                        # Regular pose data
+                        f.write(f"Frame {frame:4d} | {pose_data['pose_name']}\n")
+                        f.write(f"             | Control: {pose_data['control_attr']}\n")
+                        f.write(f"             | Value: {pose_data['value']}\n")
+                        f.write(f"             | Pose Attr: {pose_data['pose_attr']}\n")
+                    f.write("-" * 80 + "\n")
+            
+            logger.info(f"Frame mapping written to: {output_file}")
+            
+        except (OSError, IOError, PermissionError) as e:
+            logger.error(f"Failed to write frame mapping to file '{output_file}': {e}")
+            # Don't raise exception - this is supplementary information
+    
     def get_default_output_path(self) -> str:
         """
         Get the default output path for pose names file.
@@ -1441,6 +1644,28 @@ class FacialPoseAnimator:
                 return os.path.join(os.getcwd(), "posename.txt")
         except Exception:
             return os.path.join(os.getcwd(), "posename.txt")
+    
+    def get_frame_to_pose_mapping(self) -> Dict[int, Any]:
+        """
+        Get the frame to pose mapping from the last animation operation.
+        
+        Returns:
+            Dict[int, Any]: Dictionary mapping frame numbers to pose information.
+                           Returns empty dict if no animation has been run.
+        """
+        return self.last_frame_to_pose_map.copy()
+    
+    def get_pose_at_frame(self, frame: int) -> Optional[Any]:
+        """
+        Get the pose information for a specific frame.
+        
+        Args:
+            frame: The frame number to query
+            
+        Returns:
+            Pose information (dict or string) if frame exists, None otherwise
+        """
+        return self.last_frame_to_pose_map.get(frame)
     
     def get_driver_metadata_info(self, driver_node_name: Optional[str] = None) -> Dict[str, Any]:
         """
