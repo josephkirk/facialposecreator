@@ -168,6 +168,94 @@ class FacialPoseAnimator:
             "translateZ": lambda x: pm.transformLimits(x, tz=1, q=1)
         }
     
+    def _create_limit_query_lambda(self, query_type: str):
+        """
+        Create a lambda function for a given transform limit query type.
+        
+        Args:
+            query_type: Query type string (tx, ty, tz, rx, ry, rz, sx, sy, sz)
+            
+        Returns:
+            Lambda function for the query, or None if invalid
+        """
+        query_map = {
+            'tx': lambda x: pm.transformLimits(x, tx=1, q=1),
+            'ty': lambda x: pm.transformLimits(x, ty=1, q=1),
+            'tz': lambda x: pm.transformLimits(x, tz=1, q=1),
+            'rx': lambda x: pm.transformLimits(x, rx=1, q=1),
+            'ry': lambda x: pm.transformLimits(x, ry=1, q=1),
+            'rz': lambda x: pm.transformLimits(x, rz=1, q=1),
+            'sx': lambda x: pm.transformLimits(x, sx=1, q=1),
+            'sy': lambda x: pm.transformLimits(x, sy=1, q=1),
+            'sz': lambda x: pm.transformLimits(x, sz=1, q=1)
+        }
+        return query_map.get(query_type)
+    
+    def update_limit_type_map(self, limit_mappings: Dict[str, str]) -> Dict[str, bool]:
+        """
+        Update the limit type map with new attribute-to-query-type mappings.
+        
+        Args:
+            limit_mappings: Dictionary mapping attribute names to query types
+                          e.g., {"translateX": "tx", "rotateY": "ry"}
+        
+        Returns:
+            Dict[str, bool]: Dictionary indicating success/failure for each mapping
+        """
+        results = {}
+        new_limit_map = {}
+        
+        for attr_name, query_type in limit_mappings.items():
+            if not attr_name or not query_type:
+                results[attr_name] = False
+                continue
+            
+            limit_func = self._create_limit_query_lambda(query_type)
+            if limit_func:
+                new_limit_map[attr_name] = limit_func
+                results[attr_name] = True
+                logger.debug(f"Added limit mapping: {attr_name} -> {query_type}")
+            else:
+                results[attr_name] = False
+                logger.warning(f"Invalid query type '{query_type}' for attribute '{attr_name}'")
+        
+        # Update the limit type map
+        self.limit_type_map = new_limit_map
+        logger.info(f"Updated limit type map with {len(new_limit_map)} mappings.")
+        
+        return results
+    
+    def get_limit_type_map_as_dict(self) -> Dict[str, str]:
+        """
+        Get the current limit type map as a dictionary of attribute names to query types.
+        
+        Returns:
+            Dict[str, str]: Dictionary mapping attribute names to query type strings
+        """
+        # Reverse mapping from attribute names to query types
+        query_type_map = {
+            'translateX': 'tx', 'translateY': 'ty', 'translateZ': 'tz',
+            'rotateX': 'rx', 'rotateY': 'ry', 'rotateZ': 'rz',
+            'scaleX': 'sx', 'scaleY': 'sy', 'scaleZ': 'sz'
+        }
+        
+        result = {}
+        for attr_name in self.limit_type_map.keys():
+            # Try to determine query type from common attribute names
+            query_type = query_type_map.get(attr_name, 'tx')
+            result[attr_name] = query_type
+        
+        return result
+    
+    def get_supported_query_types(self) -> List[str]:
+        """
+        Get list of supported query types for transform limits.
+        
+        Returns:
+            List[str]: List of supported query type strings
+        """
+        return ['tx', 'ty', 'tz', 'rx', 'ry', 'rz', 'sx', 'sy', 'sz']
+    
     def _is_valid_control(self, control: pm.PyNode) -> bool:
         """
         Check if a control node is valid for processing.

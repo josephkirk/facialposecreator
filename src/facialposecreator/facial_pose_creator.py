@@ -206,6 +206,60 @@ class FacialPoseCreatorUI(QMainWindow):
         else:
             self.log_message("Facial Pose Animator initialized successfully with Maya integration.")
         
+        # Load current settings from animator
+        self.load_settings_from_animator()
+        
+    def load_settings_from_animator(self):
+        """Load current settings from the animator into the UI."""
+        if not self.animator:
+            self.log_message("Animator not available. Using default settings.")
+            return
+        
+        try:
+            # Load tolerance
+            self.tolerance_spinbox.setValue(self.animator.tolerance)
+            
+            # Load undo tracking
+            self.undo_tracking_check.setChecked(self.animator.enable_undo_tracking)
+            
+            # Load excluded nodes
+            self.excluded_nodes_edit.setPlainText('\n'.join(self.animator.excluded_nodes))
+            
+            # Load excluded attributes
+            self.excluded_attrs_edit.setPlainText('\n'.join(self.animator.excluded_attributes))
+            
+            # Load limit type map from animator
+            self.limits_table.setRowCount(0)  # Clear existing rows
+            
+            # Check if the method exists (for backward compatibility with older animator versions)
+            if hasattr(self.animator, 'get_limit_type_map_as_dict'):
+                limit_mappings = self.animator.get_limit_type_map_as_dict()
+                for attr_name, query_type in limit_mappings.items():
+                    row = self.limits_table.rowCount()
+                    self.limits_table.insertRow(row)
+                    self.limits_table.setItem(row, 0, QTableWidgetItem(attr_name))
+                    self.limits_table.setItem(row, 1, QTableWidgetItem(query_type))
+            else:
+                # Fallback: manually extract from limit_type_map if method doesn't exist
+                self.log_message("Note: Using older animator version. Please reload the module for full functionality.")
+                if hasattr(self.animator, 'limit_type_map'):
+                    query_type_map = {
+                        'translateX': 'tx', 'translateY': 'ty', 'translateZ': 'tz',
+                        'rotateX': 'rx', 'rotateY': 'ry', 'rotateZ': 'rz',
+                        'scaleX': 'sx', 'scaleY': 'sy', 'scaleZ': 'sz'
+                    }
+                    for attr_name in self.animator.limit_type_map.keys():
+                        row = self.limits_table.rowCount()
+                        self.limits_table.insertRow(row)
+                        query_type = query_type_map.get(attr_name, 'tx')
+                        self.limits_table.setItem(row, 0, QTableWidgetItem(attr_name))
+                        self.limits_table.setItem(row, 1, QTableWidgetItem(query_type))
+            
+            self.log_message("Loaded current settings from animator.")
+            
+        except Exception as e:
+            self.log_message(f"Warning: Could not load all settings from animator: {e}")
+    
     def create_setup_tab(self):
         """Create the setup tab for initial configuration."""
         setup_tab = QWidget()
@@ -503,6 +557,59 @@ class FacialPoseCreatorUI(QMainWindow):
         
         excluded_attrs_group.setLayout(excluded_attrs_layout)
         layout.addWidget(excluded_attrs_group)
+        
+        # Transform limits group
+        limits_group = QGroupBox("Transform Limit Queries")
+        limits_layout = QVBoxLayout()
+        
+        limits_info_label = QLabel(
+            "Configure which attributes use transform limits for value ranges:\n"
+            "Query types: tx/ty/tz (translate), rx/ry/rz (rotate), sx/sy/sz (scale)"
+        )
+        limits_info_label.setWordWrap(True)
+        limits_layout.addWidget(limits_info_label)
+        
+        # Table for limit type mappings
+        self.limits_table = QTableWidget()
+        self.limits_table.setColumnCount(2)
+        self.limits_table.setHorizontalHeaderLabels(["Attribute", "Query Type"])
+        self.limits_table.horizontalHeader().setStretchLastSection(True)
+        self.limits_table.setMaximumHeight(120)
+        self.limits_table.setToolTip(
+            "Map Maya attribute names to their transform limit query types.\n"
+            "Example: 'translateX' -> 'tx' will query translation limits on X axis."
+        )
+        
+        # Populate with default values (will be overwritten by load_settings_from_animator if animator is available)
+        default_limits = [
+            ("translateX", "tx"),
+            ("translateY", "ty"),
+            ("translateZ", "tz")
+        ]
+        
+        for attr, query_type in default_limits:
+            row = self.limits_table.rowCount()
+            self.limits_table.insertRow(row)
+            self.limits_table.setItem(row, 0, QTableWidgetItem(attr))
+            self.limits_table.setItem(row, 1, QTableWidgetItem(query_type))
+        
+        limits_layout.addWidget(self.limits_table)
+        
+        # Buttons for managing limits
+        limits_buttons_layout = QHBoxLayout()
+        self.add_limit_btn = QPushButton("Add Limit")
+        self.add_limit_btn.clicked.connect(self.add_limit_mapping)
+        limits_buttons_layout.addWidget(self.add_limit_btn)
+        
+        self.remove_limit_btn = QPushButton("Remove Selected")
+        self.remove_limit_btn.clicked.connect(self.remove_limit_mapping)
+        limits_buttons_layout.addWidget(self.remove_limit_btn)
+        
+        limits_buttons_layout.addStretch()
+        limits_layout.addLayout(limits_buttons_layout)
+        
+        limits_group.setLayout(limits_layout)
+        layout.addWidget(limits_group)
         
         # Apply settings button
         self.apply_settings_btn = QPushButton("Apply Settings")
@@ -846,6 +953,24 @@ class FacialPoseCreatorUI(QMainWindow):
         self.log_message(f"Testing attribute: {attr_name}")
         QMessageBox.information(self, "Info", f"Testing feature for attribute '{attr_name}' is not yet implemented.")
     
+    def add_limit_mapping(self):
+        """Add a new limit mapping row."""
+        row = self.limits_table.rowCount()
+        self.limits_table.insertRow(row)
+        self.limits_table.setItem(row, 0, QTableWidgetItem(""))
+        self.limits_table.setItem(row, 1, QTableWidgetItem(""))
+        self.log_message("Added new limit mapping row. Enter attribute name and query type (e.g., 'tx', 'ty', 'tz', 'rx', 'ry', 'rz').")
+    
+    def remove_limit_mapping(self):
+        """Remove the selected limit mapping row."""
+        current_row = self.limits_table.currentRow()
+        if current_row >= 0:
+            attr_name = self.limits_table.item(current_row, 0).text() if self.limits_table.item(current_row, 0) else ""
+            self.limits_table.removeRow(current_row)
+            self.log_message(f"Removed limit mapping for: {attr_name if attr_name else 'empty row'}")
+        else:
+            QMessageBox.warning(self, "Warning", "Please select a row to remove.")
+    
     def apply_settings(self):
         """Apply the current settings to the animator."""
         if not self.animator:
@@ -872,6 +997,37 @@ class FacialPoseCreatorUI(QMainWindow):
                 if attr.strip()
             ]
             self.animator.excluded_attributes = excluded_attrs
+            
+            # Update transform limit type map
+            limit_mappings = {}
+            
+            for row in range(self.limits_table.rowCount()):
+                attr_item = self.limits_table.item(row, 0)
+                query_item = self.limits_table.item(row, 1)
+                
+                if attr_item and query_item:
+                    attr_name = attr_item.text().strip()
+                    query_type = query_item.text().strip()
+                    
+                    if attr_name and query_type:
+                        limit_mappings[attr_name] = query_type
+            
+            # Use the animator's method to update the limit type map if available
+            if hasattr(self.animator, 'update_limit_type_map'):
+                results = self.animator.update_limit_type_map(limit_mappings)
+                
+                # Log results
+                failed_mappings = [attr for attr, success in results.items() if not success]
+                if failed_mappings:
+                    self.log_message(f"WARNING: Invalid mappings for: {', '.join(failed_mappings)}")
+                
+                success_count = sum(1 for success in results.values() if success)
+                self.log_message(f"Updated limit type map with {success_count} mappings.")
+            else:
+                # Fallback: directly update the limit_type_map (older version)
+                self.log_message("Note: Using older animator version. Please reload the module for full functionality.")
+                # We can't easily update lambdas without the helper method, so just log a warning
+                self.log_message("WARNING: Limit type map updates require reloading the facial_pose_animator module.")
             
             self.log_message("Settings applied successfully.")
             QMessageBox.information(self, "Success", "Settings applied successfully.")

@@ -44,6 +44,14 @@ except ImportError:
     UI_AVAILABLE = False
     facial_pose_creator = None
 
+# Reload utilities (always available)
+try:
+    from . import reload_modules
+    RELOAD_AVAILABLE = True
+except ImportError:
+    RELOAD_AVAILABLE = False
+    reload_modules = None
+
 # Convenience function to show UI
 def show_ui():
     """
@@ -59,6 +67,23 @@ def show_ui():
     return facial_pose_creator.show_ui()
 
 
+# Convenience function to reload modules
+def reload():
+    """
+    Reload all Facial Pose Creator modules.
+    
+    Useful during development to update modules without restarting Maya.
+    
+    Returns:
+        Dictionary with reload statistics if successful, None otherwise.
+    """
+    if not RELOAD_AVAILABLE:
+        print("Error: reload_modules not available.")
+        return None
+    
+    return reload_modules.reload_all()
+
+
 # Package info
 def get_info():
     """Get package information."""
@@ -67,6 +92,7 @@ def get_info():
         'author': __author__,
         'animator_available': ANIMATOR_AVAILABLE,
         'ui_available': UI_AVAILABLE,
+        'reload_available': RELOAD_AVAILABLE,
     }
     return info
 
@@ -94,11 +120,16 @@ __all__ = [
     # UI module
     'facial_pose_creator',
     
+    # Reload utilities
+    'reload_modules',
+    
     # Functions
     'show_ui',
+    'reload',
     'get_info',
     
     # Availability flags
     'ANIMATOR_AVAILABLE',
     'UI_AVAILABLE',
+    'RELOAD_AVAILABLE',
 ]
