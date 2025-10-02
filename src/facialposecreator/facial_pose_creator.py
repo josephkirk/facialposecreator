@@ -127,7 +127,7 @@ class PoseInfoDialog(QDialog):
 class FacialPoseCreatorUI(QMainWindow):
     """Main UI window for the Facial Pose Creator."""
     
-    def __init__(self):
+    def __init__(self, parent=None):
         super().__init__()
         self.animator = None
         self.init_animator()
