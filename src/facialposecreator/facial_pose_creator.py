@@ -129,7 +129,22 @@ class FacialPoseCreatorUI(QMainWindow):
     
     def __init__(self, parent=None):
         super().__init__()
+        mayaMainWindow = QApplication.instance().activeWindow()
+        try:
+            import pymel.core as pm
+            mayaMainWindow = pm.ui.Window('MayaWindow').asQtObject()
+            pm.ui.deleteUI('FacialPoseCreatorUI')
+        except:
+            pass
+        
+        self.setParent(mayaMainWindow)
+        self.setWindowFlags(Qt.Window)
+        self.setObjectName("FacialPoseCreatorUI")
+        self.resize(900, 700)
+        self.setMinimumSize(900, 700)
+        self.setWindowTitle("Facial Pose Creator")
         self.animator = None
+        
         self.init_animator()
         self.init_ui()
         
@@ -529,7 +544,7 @@ class FacialPoseCreatorUI(QMainWindow):
             
             # Get controls
             controls = self.animator.get_facial_controls(
-                selection_mode=mode,
+                mode=mode,
                 object_set_name=self.object_set_edit.text() if self.object_set_edit.text() else None
             )
             
@@ -586,9 +601,8 @@ class FacialPoseCreatorUI(QMainWindow):
             mode = mode_map.get(mode_text, facial_pose_animator.ControlSelectionMode.PATTERN)
             
             result = self.animator.create_facial_pose_driver(
-                selection_mode=mode,
-                object_set_name=self.object_set_edit.text() if self.object_set_edit.text() else None,
-                create_metadata=True
+                mode=mode,
+                object_set_name=self.object_set_edit.text() if self.object_set_edit.text() else None
             )
             
             if result:
