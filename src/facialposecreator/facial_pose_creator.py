@@ -255,6 +255,18 @@ class FacialPoseCreatorUI(QMainWindow):
                         self.limits_table.setItem(row, 0, QTableWidgetItem(attr_name))
                         self.limits_table.setItem(row, 1, QTableWidgetItem(query_type))
             
+            # Load custom limit overrides
+            self.custom_limits_table.setRowCount(0)  # Clear existing rows
+            
+            if hasattr(self.animator, 'get_all_custom_limits'):
+                custom_limits = self.animator.get_all_custom_limits()
+                for attr_name, (min_val, max_val) in custom_limits.items():
+                    row = self.custom_limits_table.rowCount()
+                    self.custom_limits_table.insertRow(row)
+                    self.custom_limits_table.setItem(row, 0, QTableWidgetItem(attr_name))
+                    self.custom_limits_table.setItem(row, 1, QTableWidgetItem(str(min_val)))
+                    self.custom_limits_table.setItem(row, 2, QTableWidgetItem(str(max_val)))
+            
             self.log_message("Loaded current settings from animator.")
             
         except Exception as e:
@@ -610,6 +622,50 @@ class FacialPoseCreatorUI(QMainWindow):
         
         limits_group.setLayout(limits_layout)
         layout.addWidget(limits_group)
+        
+        # Custom limit overrides group
+        custom_limits_group = QGroupBox("Custom Limit Overrides")
+        custom_limits_layout = QVBoxLayout()
+        
+        custom_limits_info_label = QLabel(
+            "Define custom min/max limits for specific attributes.\n"
+            "These override both transform limits and attribute ranges.\n"
+            "Use exact attribute names (e.g., 'translateX', 'rotateY', 'customAttr')."
+        )
+        custom_limits_info_label.setWordWrap(True)
+        custom_limits_layout.addWidget(custom_limits_info_label)
+        
+        # Table for custom limits
+        self.custom_limits_table = QTableWidget()
+        self.custom_limits_table.setColumnCount(3)
+        self.custom_limits_table.setHorizontalHeaderLabels(["Attribute", "Min Value", "Max Value"])
+        self.custom_limits_table.horizontalHeader().setStretchLastSection(True)
+        self.custom_limits_table.setMaximumHeight(150)
+        self.custom_limits_table.setToolTip(
+            "Set custom limit ranges for attributes.\n"
+            "Example: 'translateX' with min=-10.0, max=10.0"
+        )
+        custom_limits_layout.addWidget(self.custom_limits_table)
+        
+        # Buttons for managing custom limits
+        custom_limits_buttons_layout = QHBoxLayout()
+        self.add_custom_limit_btn = QPushButton("Add Custom Limit")
+        self.add_custom_limit_btn.clicked.connect(self.add_custom_limit)
+        custom_limits_buttons_layout.addWidget(self.add_custom_limit_btn)
+        
+        self.remove_custom_limit_btn = QPushButton("Remove Selected")
+        self.remove_custom_limit_btn.clicked.connect(self.remove_custom_limit)
+        custom_limits_buttons_layout.addWidget(self.remove_custom_limit_btn)
+        
+        self.clear_custom_limits_btn = QPushButton("Clear All")
+        self.clear_custom_limits_btn.clicked.connect(self.clear_custom_limits)
+        custom_limits_buttons_layout.addWidget(self.clear_custom_limits_btn)
+        
+        custom_limits_buttons_layout.addStretch()
+        custom_limits_layout.addLayout(custom_limits_buttons_layout)
+        
+        custom_limits_group.setLayout(custom_limits_layout)
+        layout.addWidget(custom_limits_group)
         
         # Apply settings button
         self.apply_settings_btn = QPushButton("Apply Settings")
@@ -971,6 +1027,37 @@ class FacialPoseCreatorUI(QMainWindow):
         else:
             QMessageBox.warning(self, "Warning", "Please select a row to remove.")
     
+    def add_custom_limit(self):
+        """Add a new custom limit row."""
+        row = self.custom_limits_table.rowCount()
+        self.custom_limits_table.insertRow(row)
+        self.custom_limits_table.setItem(row, 0, QTableWidgetItem(""))
+        self.custom_limits_table.setItem(row, 1, QTableWidgetItem("0.0"))
+        self.custom_limits_table.setItem(row, 2, QTableWidgetItem("1.0"))
+        self.log_message("Added new custom limit row. Enter attribute name, min value, and max value.")
+    
+    def remove_custom_limit(self):
+        """Remove the selected custom limit row."""
+        current_row = self.custom_limits_table.currentRow()
+        if current_row >= 0:
+            attr_name = self.custom_limits_table.item(current_row, 0).text() if self.custom_limits_table.item(current_row, 0) else ""
+            self.custom_limits_table.removeRow(current_row)
+            self.log_message(f"Removed custom limit for: {attr_name if attr_name else 'empty row'}")
+        else:
+            QMessageBox.warning(self, "Warning", "Please select a row to remove.")
+    
+    def clear_custom_limits(self):
+        """Clear all custom limit rows."""
+        reply = QMessageBox.question(
+            self, "Confirm Clear",
+            "Are you sure you want to clear all custom limits?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            self.custom_limits_table.setRowCount(0)
+            self.log_message("Cleared all custom limits from table.")
+    
     def apply_settings(self):
         """Apply the current settings to the animator."""
         if not self.animator:
@@ -1028,6 +1115,42 @@ class FacialPoseCreatorUI(QMainWindow):
                 self.log_message("Note: Using older animator version. Please reload the module for full functionality.")
                 # We can't easily update lambdas without the helper method, so just log a warning
                 self.log_message("WARNING: Limit type map updates require reloading the facial_pose_animator module.")
+            
+            # Update custom limit overrides (if available)
+            if hasattr(self.animator, 'clear_custom_limits') and hasattr(self.animator, 'set_custom_limit'):
+                self.animator.clear_custom_limits()
+                custom_limits_count = 0
+                custom_limits_errors = []
+                
+                for row in range(self.custom_limits_table.rowCount()):
+                    attr_item = self.custom_limits_table.item(row, 0)
+                    min_item = self.custom_limits_table.item(row, 1)
+                    max_item = self.custom_limits_table.item(row, 2)
+                    
+                    if attr_item and min_item and max_item:
+                        attr_name = attr_item.text().strip()
+                        
+                        if attr_name:
+                            try:
+                                min_value = float(min_item.text().strip())
+                                max_value = float(max_item.text().strip())
+                                
+                                self.animator.set_custom_limit(attr_name, min_value, max_value)
+                                custom_limits_count += 1
+                            except ValueError as ve:
+                                custom_limits_errors.append(f"{attr_name}: {str(ve)}")
+                
+                if custom_limits_count > 0:
+                    self.log_message(f"Applied {custom_limits_count} custom limit override(s).")
+                
+                if custom_limits_errors:
+                    error_msg = "Custom limit errors:\n" + "\n".join(custom_limits_errors)
+                    self.log_message(f"WARNING: {error_msg}")
+                    QMessageBox.warning(self, "Custom Limit Errors", error_msg)
+            else:
+                # Custom limits feature not available
+                if self.custom_limits_table.rowCount() > 0:
+                    self.log_message("WARNING: Custom limits feature requires reloading the facial_pose_animator module.")
             
             self.log_message("Settings applied successfully.")
             QMessageBox.information(self, "Success", "Settings applied successfully.")

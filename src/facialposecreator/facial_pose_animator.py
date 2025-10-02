@@ -167,6 +167,10 @@ class FacialPoseAnimator:
             "translateY": lambda x: pm.transformLimits(x, ty=1, q=1),
             "translateZ": lambda x: pm.transformLimits(x, tz=1, q=1)
         }
+        
+        # Custom limit overrides (takes precedence over transform limits)
+        # Format: {attribute_name: [min_value, max_value]}
+        self.custom_limits: Dict[str, List[float]] = {}
     
     def _create_limit_query_lambda(self, query_type: str):
         """
@@ -256,6 +260,70 @@ class FacialPoseAnimator:
         """
         return ['tx', 'ty', 'tz', 'rx', 'ry', 'rz', 'sx', 'sy', 'sz']
     
+    def set_custom_limit(self, attribute_name: str, min_value: float, max_value: float) -> bool:
+        """
+        Set a custom limit override for an attribute.
+        
+        Args:
+            attribute_name: Name of the attribute (e.g., "translateX", "rotateY")
+            min_value: Minimum value for the attribute
+            max_value: Maximum value for the attribute
+            
+        Returns:
+            bool: True if successful
+            
+        Raises:
+            ValueError: If min_value >= max_value
+        """
+        if min_value >= max_value:
+            raise ValueError(f"Minimum value ({min_value}) must be less than maximum value ({max_value})")
+        
+        self.custom_limits[attribute_name] = [min_value, max_value]
+        logger.info(f"Set custom limit for '{attribute_name}': [{min_value}, {max_value}]")
+        return True
+    
+    def get_custom_limit(self, attribute_name: str) -> Optional[List[float]]:
+        """
+        Get the custom limit override for an attribute.
+        
+        Args:
+            attribute_name: Name of the attribute
+            
+        Returns:
+            Optional[List[float]]: [min, max] if custom limit exists, None otherwise
+        """
+        return self.custom_limits.get(attribute_name)
+    
+    def remove_custom_limit(self, attribute_name: str) -> bool:
+        """
+        Remove a custom limit override for an attribute.
+        
+        Args:
+            attribute_name: Name of the attribute
+            
+        Returns:
+            bool: True if limit was removed, False if it didn't exist
+        """
+        if attribute_name in self.custom_limits:
+            del self.custom_limits[attribute_name]
+            logger.info(f"Removed custom limit for '{attribute_name}'")
+            return True
+        return False
+    
+    def clear_custom_limits(self) -> None:
+        """Clear all custom limit overrides."""
+        self.custom_limits.clear()
+        logger.info("Cleared all custom limits")
+    
+    def get_all_custom_limits(self) -> Dict[str, List[float]]:
+        """
+        Get all custom limit overrides.
+        
+        Returns:
+            Dict[str, List[float]]: Dictionary of attribute_name -> [min, max]
+        """
+        return self.custom_limits.copy()
+    
     def _is_valid_control(self, control: pm.PyNode) -> bool:
         """
         Check if a control node is valid for processing.
@@ -300,6 +368,12 @@ class FacialPoseAnimator:
         """
         attr_name = attribute.longName()
         
+        # First check if there's a custom limit override
+        if attr_name in self.custom_limits:
+            min_val, max_val = self.custom_limits[attr_name]
+            logger.info(f"Using custom limit override for {attr_name}: [{min_val}, {max_val}]")
+            return [min_val, max_val]
+        
         # Check if it's a transform attribute with limits
         for limit_attr, limit_func in self.limit_type_map.items():
             if limit_attr in attr_name:
@@ -307,6 +381,7 @@ class FacialPoseAnimator:
         
         # Default to attribute's range
         return attribute.getRange()
+
     
     def _generate_pose_name(self, control: pm.PyNode, attribute: pm.Attribute, value: float) -> str:
         """
