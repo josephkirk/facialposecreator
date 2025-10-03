@@ -1037,9 +1037,20 @@ class FacialPoseCreatorUI(QMainWindow):
             pose_data = self.animator.save_pose_from_selection(
                 pose_name=pose_name,
                 description=description,
-                use_current_selection=from_selection,
-                create_driver_attribute=create_attr
+                use_current_selection=from_selection
             )
+            
+            # Create driver attribute if requested and driver node exists
+            if create_attr and pose_data:
+                try:
+                    success = self.animator.create_pose_driver_attribute(pose_name)
+                    if success:
+                        self.log_message(f"Created driver attribute for pose: {pose_name}")
+                    else:
+                        self.log_message(f"Note: Driver attribute already exists for pose: {pose_name}")
+                except Exception as attr_error:
+                    self.log_message(f"Warning: Could not create driver attribute: {attr_error}")
+                    # Don't fail the whole operation if driver attribute creation fails
             
             if pose_data:
                 self.log_message(f"Saved pose: {pose_name}")
