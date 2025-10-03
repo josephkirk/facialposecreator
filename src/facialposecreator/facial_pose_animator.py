@@ -1763,7 +1763,8 @@ class FacialPoseAnimator:
                                 description: str = "",
                                 use_current_selection: bool = True,
                                 auto_save_to_file: bool = True,
-                                output_directory: Optional[str] = None) -> FacialPoseData:
+                                output_directory: Optional[str] = None,
+                                include_zero_values: bool = False) -> FacialPoseData:
         """
         Save a pose from currently selected nodes or all valid controls.
         
@@ -1773,6 +1774,7 @@ class FacialPoseAnimator:
             use_current_selection: If True, use selected nodes; if False, use all valid controls
             auto_save_to_file: If True, automatically save pose to JSON file
             output_directory: Directory to save pose file (uses default if None)
+            include_zero_values: If True, capture all values including zeros; if False, only capture non-zero values above tolerance
             
         Returns:
             FacialPoseData: The created pose data
@@ -1812,8 +1814,8 @@ class FacialPoseAnimator:
                             attr_name = attr.longName()
                             current_value = attr.get()
                             
-                            # Only store non-zero values (with tolerance)
-                            if abs(current_value) >= self.tolerance:
+                            # Store values based on include_zero_values setting
+                            if include_zero_values or abs(current_value) >= self.tolerance:
                                 control_attrs[attr_name] = float(current_value)
                                 captured_count += 1
                         except (pm.MayaAttributeError, RuntimeError, TypeError) as e:
@@ -1824,7 +1826,10 @@ class FacialPoseAnimator:
                     controls_data[control_name] = control_attrs
             
             if not controls_data:
-                raise PoseDataError("No non-zero attribute values found to capture in pose.")
+                if include_zero_values:
+                    raise PoseDataError("No valid attribute values found to capture in pose.")
+                else:
+                    raise PoseDataError("No non-zero attribute values found to capture in pose. Try enabling 'Include Zero Values' option.")
             
             # Create pose data
             from datetime import datetime

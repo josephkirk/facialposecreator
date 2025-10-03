@@ -471,6 +471,14 @@ class FacialPoseCreatorUI(QMainWindow):
         self.save_from_selection_check.setChecked(False)
         options_layout.addWidget(self.save_from_selection_check)
         
+        self.include_zero_values_check = QCheckBox("Include zero/default values")
+        self.include_zero_values_check.setChecked(False)
+        self.include_zero_values_check.setToolTip(
+            "If checked, saves all attribute values including zeros.\n"
+            "Useful for saving neutral/rest poses."
+        )
+        options_layout.addWidget(self.include_zero_values_check)
+        
         self.create_driver_attr_check = QCheckBox("Create driver attribute")
         self.create_driver_attr_check.setChecked(True)
         options_layout.addWidget(self.create_driver_attr_check)
@@ -1031,13 +1039,15 @@ class FacialPoseCreatorUI(QMainWindow):
         try:
             description = self.pose_description_edit.toPlainText()
             from_selection = self.save_from_selection_check.isChecked()
+            include_zeros = self.include_zero_values_check.isChecked()
             create_attr = self.create_driver_attr_check.isChecked()
             
             # Save the pose (always use save_pose_from_selection with use_current_selection parameter)
             pose_data = self.animator.save_pose_from_selection(
                 pose_name=pose_name,
                 description=description,
-                use_current_selection=from_selection
+                use_current_selection=from_selection,
+                include_zero_values=include_zeros
             )
             
             # Create driver attribute if requested and driver node exists
