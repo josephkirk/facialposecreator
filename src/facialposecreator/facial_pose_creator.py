@@ -7,6 +7,17 @@ Provides a comprehensive GUI for creating, managing, and animating facial contro
 
 Author: Nguyen Phi Hung
 Date: October 1, 2025
+Updated: October 7, 2025 - Migrated to use new unified API with improved error handling
+
+Changes (October 7, 2025):
+- Imported new unified API functions (safe_animate_poses, safe_create_driver, safe_save_pose, safe_load_poses)
+- Imported exception classes for proper error handling (FacialAnimatorError and subclasses)
+- Updated animate_facial_poses_handler() to use safe_animate_poses with specific exception handling
+- Updated save_pose() to use safe_save_pose with specific exception handling
+- Updated create_driver() to use safe_create_driver with specific exception handling
+- Updated load_poses_from_file() to use safe_load_poses
+- All UI operations now use "safe" variants that return None on error instead of raising exceptions
+- Improved error messages with specific exception types (ControlSelectionError, DriverNodeError, etc.)
 """
 
 import sys
@@ -44,6 +55,24 @@ except ImportError:
 # Import the facial pose animator module
 try:
     from . import facial_pose_animator
+    # Import the new unified API functions
+    from .facial_pose_animator import (
+        # Exception classes for proper error handling
+        FacialAnimatorError,
+        ControlSelectionError,
+        DriverNodeError,
+        InvalidAttributeError,
+        FileOperationError,
+        ObjectSetError,
+        PoseDataError,
+        # Enums for selection modes
+        ControlSelectionMode,
+        # New unified convenience functions (safe variants for UI)
+        safe_animate_poses,
+        safe_create_driver,
+        safe_save_pose,
+        safe_load_poses,
+    )
     # Additional check: verify we're actually in Maya
     try:
         import maya.cmds as cmds
@@ -51,6 +80,7 @@ try:
         cmds.about(version=True)
         MAYA_AVAILABLE = True
         print("facial_pose_animator module imported successfully - Maya detected")
+        print("Imported new unified API functions for UI")
     except Exception as maya_check_error:
         # Maya commands not available or not running
         print(f"PyMEL available but Maya not running: {maya_check_error}")
@@ -60,6 +90,14 @@ except ImportError as e:
     print(f"Warning: Maya/PyMEL not available. Running in standalone mode. Error: {e}")
     MAYA_AVAILABLE = False
     facial_pose_animator = None
+    # Define dummy exception classes for standalone mode
+    class FacialAnimatorError(Exception): pass
+    class ControlSelectionError(FacialAnimatorError): pass
+    class DriverNodeError(FacialAnimatorError): pass
+    class InvalidAttributeError(FacialAnimatorError): pass
+    class FileOperationError(FacialAnimatorError): pass
+    class ObjectSetError(FacialAnimatorError): pass
+    class PoseDataError(FacialAnimatorError): pass
 
 
 class PoseInfoDialog(QDialog):
@@ -817,14 +855,16 @@ class FacialPoseCreatorUI(QMainWindow):
             self.log_message(f"ERROR: {str(e)}")
     
     def create_driver(self):
-        """Create the facial pose driver node."""
+        """Create the facial pose driver node with improved error handling."""
         if not self.animator:
             QMessageBox.warning(self, "Error", "Animator not initialized.")
             return
         
         try:
             driver_name = self.driver_name_edit.text()
-            self.animator.facial_driver_node = driver_name
+            if driver_name:
+                # Set the driver node name on the animator instance
+                self.animator.facial_driver_node = driver_name
             
             mode_text = self.selection_mode_combo.currentText()
             mode_map = {
@@ -835,22 +875,49 @@ class FacialPoseCreatorUI(QMainWindow):
             }
             mode = mode_map.get(mode_text, facial_pose_animator.ControlSelectionMode.PATTERN)
             
-            result = self.animator.create_facial_pose_driver(
+            # Get object set name if in OBJECT_SET mode
+            object_set_name = None
+            if mode == facial_pose_animator.ControlSelectionMode.OBJECT_SET:
+                object_set_name = self.object_set_edit.text()
+                if not object_set_name:
+                    QMessageBox.warning(self, "Warning", "Object Set mode requires a set name.")
+                    return
+            
+            # Use the new safe_create_driver function
+            # Note: driver_node name is set on animator instance, not passed as parameter
+            result = safe_create_driver(
                 mode=mode,
-                object_set_name=self.object_set_edit.text() if self.object_set_edit.text() else None
+                object_set_name=object_set_name
             )
             
             if result:
-                self.log_message(f"Created facial pose driver: {driver_name}")
+                self.log_message(f"Created facial pose driver: {result}")
                 self.update_driver_status_display()  # Refresh driver status
-                QMessageBox.information(self, "Success", f"Created driver node: {driver_name}")
+                QMessageBox.information(self, "Success", f"Created driver node: {result}")
             else:
-                self.log_message("Failed to create driver node.")
-                self.update_driver_status_display()  # Refresh even on failure
+                self.log_message("Failed to create facial pose driver")
+                QMessageBox.warning(self, "Warning", "Could not create driver node. Check selection and controls.")
+                
+        except ControlSelectionError as e:
+            error_msg = f"Control selection error: {str(e)}"
+            QMessageBox.warning(self, "Control Selection Error", error_msg)
+            self.log_message(f"CONTROL SELECTION ERROR: {error_msg}")
+            self.update_driver_status_display()
+        except DriverNodeError as e:
+            error_msg = f"Driver node error: {str(e)}"
+            QMessageBox.warning(self, "Driver Node Error", error_msg)
+            self.log_message(f"DRIVER NODE ERROR: {error_msg}")
+            self.update_driver_status_display()
+        except FacialAnimatorError as e:
+            error_msg = f"Failed to create driver: {str(e)}"
+            QMessageBox.critical(self, "Animator Error", error_msg)
+            self.log_message(f"ANIMATOR ERROR: {error_msg}")
+            self.update_driver_status_display()
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to create driver: {str(e)}")
-            self.log_message(f"ERROR: {str(e)}")
-            self.update_driver_status_display()  # Refresh to show current state
+            error_msg = f"Unexpected error: {str(e)}"
+            QMessageBox.critical(self, "Error", error_msg)
+            self.log_message(f"ERROR: {error_msg}")
+            self.update_driver_status_display()
     
     def browse_output_file(self):
         """Browse for output file to save pose names."""
@@ -950,7 +1017,7 @@ class FacialPoseCreatorUI(QMainWindow):
             self.log_message(f"Error updating driver status: {e}")
     
     def animate_facial_poses_handler(self):
-        """Handler for auto-animating facial poses to their limits."""
+        """Handler for auto-animating facial poses using the new unified API."""
         if not self.animator:
             QMessageBox.warning(self, "Error", "Animator not initialized. Maya may not be available.")
             return
@@ -974,11 +1041,24 @@ class FacialPoseCreatorUI(QMainWindow):
             if not output_file:
                 output_file = None
             
+            # Get object set name if in OBJECT_SET mode
+            object_set_name = None
+            if mode == facial_pose_animator.ControlSelectionMode.OBJECT_SET:
+                object_set_name = self.object_set_edit.text()
+                if not object_set_name:
+                    QMessageBox.warning(self, "Warning", "Object Set mode requires a set name.")
+                    return
+            
             # Show confirmation dialog
-            controls = self.animator.get_facial_controls(
-                mode=mode,
-                object_set_name=self.object_set_edit.text() if self.object_set_edit.text() else None
-            )
+            try:
+                controls = self.animator.get_facial_controls(
+                    mode=mode,
+                    object_set_name=object_set_name
+                )
+            except ControlSelectionError as e:
+                QMessageBox.warning(self, "Control Selection Error", f"Cannot get controls: {str(e)}")
+                self.log_message(f"CONTROL SELECTION ERROR: {str(e)}")
+                return
             
             reply = QMessageBox.question(
                 self,
@@ -992,40 +1072,69 @@ class FacialPoseCreatorUI(QMainWindow):
                 self.log_message("Animation cancelled by user.")
                 return
             
-            # Animate poses
+            # Use the new safe_animate_poses function
             self.log_message("Starting facial pose animation...")
             self.log_message(f"Using selection mode: {mode_text}")
             self.statusBar().showMessage("Animating facial poses...")
             
-            pose_names = self.animator.animate_facial_poses(
+            pose_names = safe_animate_poses(
                 output_file=output_file,
                 mode=mode,
-                object_set_name=self.object_set_edit.text() if self.object_set_edit.text() else None
+                object_set_name=object_set_name
             )
             
-            # Show success message
-            self.log_message(f"Animation completed! Generated {len(pose_names)} poses.")
-            if output_file:
-                self.log_message(f"Pose names written to: {output_file}")
+            if pose_names:
+                # Show success message
+                self.log_message(f"Animation completed! Generated {len(pose_names)} poses.")
+                if output_file:
+                    self.log_message(f"Pose names written to: {output_file}")
+                
+                self.update_driver_status_display()  # Refresh driver status after animation
+                self.statusBar().showMessage("Animation completed successfully.", 5000)
+                QMessageBox.information(
+                    self,
+                    "Success",
+                    f"Successfully animated {len(pose_names)} poses.\n"
+                    f"Each pose has been keyed on a separate frame."
+                )
+            else:
+                # safe_animate_poses returns None on error
+                self.log_message("Animation failed or produced no poses.")
+                self.statusBar().showMessage("Animation failed.", 5000)
+                QMessageBox.warning(
+                    self,
+                    "Warning",
+                    "Animation completed but no poses were generated.\n"
+                    "Check the log for details."
+                )
             
-            self.update_driver_status_display()  # Refresh driver status after animation
-            self.statusBar().showMessage("Animation completed successfully.", 5000)
-            QMessageBox.information(
-                self,
-                "Success",
-                f"Successfully animated {len(pose_names)} poses.\n"
-                f"Each pose has been keyed on a separate frame."
-            )
-            
+        except ControlSelectionError as e:
+            error_msg = f"Control selection error: {str(e)}"
+            QMessageBox.warning(self, "Control Selection Error", error_msg)
+            self.log_message(f"CONTROL SELECTION ERROR: {error_msg}")
+            self.update_driver_status_display()
+            self.statusBar().showMessage("Animation failed.", 5000)
+        except DriverNodeError as e:
+            error_msg = f"Driver node error: {str(e)}"
+            QMessageBox.warning(self, "Driver Node Error", error_msg)
+            self.log_message(f"DRIVER NODE ERROR: {error_msg}")
+            self.update_driver_status_display()
+            self.statusBar().showMessage("Animation failed.", 5000)
+        except FacialAnimatorError as e:
+            error_msg = f"Animation error: {str(e)}"
+            QMessageBox.critical(self, "Animator Error", error_msg)
+            self.log_message(f"ANIMATOR ERROR: {error_msg}")
+            self.update_driver_status_display()
+            self.statusBar().showMessage("Animation failed.", 5000)
         except Exception as e:
-            error_msg = f"Failed to animate facial poses: {str(e)}"
+            error_msg = f"Unexpected error during animation: {str(e)}"
             QMessageBox.critical(self, "Error", error_msg)
             self.log_message(f"ERROR: {error_msg}")
-            self.update_driver_status_display()  # Refresh even on failure
+            self.update_driver_status_display()
             self.statusBar().showMessage("Animation failed.", 5000)
     
     def save_pose(self):
-        """Save a pose from current state."""
+        """Save a pose from current state with improved error handling."""
         if not self.animator:
             QMessageBox.warning(self, "Error", "Animator not initialized.")
             return
@@ -1041,34 +1150,51 @@ class FacialPoseCreatorUI(QMainWindow):
             include_zeros = self.include_zero_values_check.isChecked()
             create_attr = self.create_driver_attr_check.isChecked()
             
-            # Save the pose (always use save_pose_from_selection with use_current_selection parameter)
-            pose_data = self.animator.save_pose_from_selection(
+            # Use the new safe_save_pose function for better error handling
+            # Map checkbox state to ControlSelectionMode
+            mode = ControlSelectionMode.SELECTION if from_selection else None
+            pose_data = safe_save_pose(
                 pose_name=pose_name,
                 description=description,
-                use_current_selection=from_selection,
-                include_zero_values=include_zeros
+                mode=mode,
+                include_zero_values=include_zeros,
+                save_to_file=True  # Auto-save to file in UI context
             )
             
-            # Create driver attribute if requested and driver node exists
-            if create_attr and pose_data:
+            if not pose_data:
+                self.log_message(f"Failed to save pose: {pose_name}")
+                QMessageBox.warning(self, "Warning", f"Could not save pose '{pose_name}'. Check selection and controls.")
+                return
+            
+            # Create driver attribute if requested
+            if create_attr:
                 try:
+                    # Create driver attribute for the pose using animator method
+                    # This adds the pose attribute to the existing driver node
                     success = self.animator.create_pose_driver_attribute(pose_name)
                     if success:
                         self.log_message(f"Created driver attribute for pose: {pose_name}")
                     else:
-                        self.log_message(f"Note: Driver attribute already exists for pose: {pose_name}")
+                        self.log_message(f"Note: Driver attribute may already exist for pose: {pose_name}")
                 except Exception as attr_error:
-                    self.log_message(f"Warning: Could not create driver attribute: {attr_error}")
+                    self.log_message(f"Warning: Driver attribute creation failed: {attr_error}")
                     # Don't fail the whole operation if driver attribute creation fails
             
-            if pose_data:
-                self.log_message(f"Saved pose: {pose_name}")
-                self.refresh_poses_list()
-                QMessageBox.information(self, "Success", f"Saved pose: {pose_name}")
-            else:
-                self.log_message(f"Failed to save pose: {pose_name}")
+            self.log_message(f"Saved pose: {pose_name}")
+            self.refresh_poses_list()
+            QMessageBox.information(self, "Success", f"Saved pose: {pose_name}")
+            
+        except ControlSelectionError as e:
+            QMessageBox.warning(self, "Selection Error", f"Invalid control selection: {str(e)}")
+            self.log_message(f"SELECTION ERROR: {str(e)}")
+        except PoseDataError as e:
+            QMessageBox.warning(self, "Pose Data Error", f"Invalid pose data: {str(e)}")
+            self.log_message(f"POSE DATA ERROR: {str(e)}")
+        except FacialAnimatorError as e:
+            QMessageBox.critical(self, "Animator Error", f"Failed to save pose: {str(e)}")
+            self.log_message(f"ANIMATOR ERROR: {str(e)}")
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to save pose: {str(e)}")
+            QMessageBox.critical(self, "Error", f"Unexpected error: {str(e)}")
             self.log_message(f"ERROR: {str(e)}")
     
     def refresh_poses_list(self):
@@ -1167,7 +1293,7 @@ class FacialPoseCreatorUI(QMainWindow):
             self.poses_file_edit.setText(file_path)
     
     def load_poses_from_file(self):
-        """Load poses from a file."""
+        """Load poses from a file using the new unified API."""
         if not self.animator:
             QMessageBox.warning(self, "Error", "Animator not initialized.")
             return
@@ -1178,14 +1304,23 @@ class FacialPoseCreatorUI(QMainWindow):
             return
         
         try:
-            result = self.animator.import_poses_from_file(file_path)
+            # Use the new safe_load_poses function which handles errors gracefully
+            result = safe_load_poses(
+                file_path=file_path,
+                overwrite_existing=True  # UI typically wants to overwrite
+            )
+            
             if result:
-                self.log_message(f"Loaded poses from: {file_path}")
+                self.log_message(f"Loaded {len(result)} poses from: {file_path}")
                 self.refresh_poses_list()
                 QMessageBox.information(self, "Success", f"Loaded {len(result)} poses from file.")
             else:
+                # safe_load_poses returns None on error
                 self.log_message(f"Failed to load poses from: {file_path}")
+                QMessageBox.warning(self, "Warning", "No poses could be loaded from file.")
+                
         except Exception as e:
+            # Catch any unexpected errors
             QMessageBox.critical(self, "Error", f"Failed to load poses: {str(e)}")
             self.log_message(f"ERROR: {str(e)}")
     
