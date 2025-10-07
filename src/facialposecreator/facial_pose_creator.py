@@ -10,8 +10,7 @@ Date: October 1, 2025
 """
 
 import sys
-import os
-from typing import Optional, List, Dict, Any
+from typing import Dict, Any
 
 # Try to import PySide6, fallback to PySide2
 try:
@@ -932,7 +931,7 @@ class FacialPoseCreatorUI(QMainWindow):
                 else:
                     # Driver exists but has issues
                     status_text = f"⚠️ Driver: <b>{driver_name}</b><br>"
-                    status_text += f"Status: Found but may have issues<br>"
+                    status_text += "Status: Found but may have issues<br>"
                     status_text += f"Error: {str(e)[:50]}..."
                     
                     self.driver_status_label.setText(status_text)

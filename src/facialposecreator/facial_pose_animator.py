@@ -1368,7 +1368,7 @@ class FacialPoseAnimator:
                 logger.info(f"Driver creation completed. Created {pose_count} pose attributes with metadata connections.")
                 return driver_node
                 
-            except Exception as e:
+            except Exception:
                 # If we created the driver node and something failed, the cleanup will handle it
                 if driver_node_created:
                     logger.warning("Driver node creation failed, cleanup will remove the created node.")
@@ -2417,7 +2417,14 @@ def quick_reset_facial_controls(mode: Optional[ControlSelectionMode] = None,
                                object_set_name: Optional[str] = None,
                                use_selection: bool = False) -> bool:
     """
+    DEPRECATED: Use safe_reset_controls() instead.
+    
     Quick function to reset all facial controls.
+    
+    .. deprecated::
+        This function will be removed in version 2.0.
+        Use safe_reset_controls() for the same behavior, or reset_controls()
+        if you want exceptions to be raised.
     
     Returns:
         bool: True if reset was successful, False otherwise
@@ -2426,6 +2433,12 @@ def quick_reset_facial_controls(mode: Optional[ControlSelectionMode] = None,
         ControlSelectionError: If no valid controls can be found
         InvalidAttributeError: If attribute operations fail
     """
+    import warnings
+    warnings.warn(
+        "quick_reset_facial_controls() is deprecated. Use safe_reset_controls() or reset_controls() instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     try:
         animator = FacialPoseAnimator()
         animator.reset_all_attributes(mode=mode, object_set_name=object_set_name, use_selection=use_selection)
@@ -2438,7 +2451,20 @@ def quick_animate_facial_poses(output_file: Optional[str] = None,
                               mode: Optional[ControlSelectionMode] = None,
                               object_set_name: Optional[str] = None,
                               use_selection: bool = False):
-    """Quick function to animate facial poses."""
+    """
+    DEPRECATED: Use animate_poses() or safe_animate_poses() instead.
+    
+    .. deprecated::
+        This function will be removed in version 2.0.
+        Use animate_poses() for exception-raising behavior, or
+        safe_animate_poses() for boolean return.
+    """
+    import warnings
+    warnings.warn(
+        "quick_animate_facial_poses() is deprecated. Use animate_poses() or safe_animate_poses() instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     animator = FacialPoseAnimator()
     default_output = animator.get_default_output_path() if output_file is None else output_file
     return animator.animate_facial_poses(default_output, mode=mode, object_set_name=object_set_name, use_selection=use_selection)
@@ -2447,7 +2473,20 @@ def quick_animate_facial_poses(output_file: Optional[str] = None,
 def quick_create_pose_driver(mode: Optional[ControlSelectionMode] = None,
                             object_set_name: Optional[str] = None,
                             use_selection: bool = False):
-    """Quick function to create facial pose driver."""
+    """
+    DEPRECATED: Use create_driver() or safe_create_driver() instead.
+    
+    .. deprecated::
+        This function will be removed in version 2.0.
+        Use create_driver() for exception-raising behavior, or
+        safe_create_driver() for None-returning behavior.
+    """
+    import warnings
+    warnings.warn(
+        "quick_create_pose_driver() is deprecated. Use create_driver() or safe_create_driver() instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     animator = FacialPoseAnimator()
     return animator.create_facial_pose_driver(mode=mode, object_set_name=object_set_name, use_selection=use_selection)
 
@@ -3153,3 +3192,438 @@ def load_all_poses_from_directory(directory: Optional[str] = None,
     
     # Apply an existing pose
     # apply_saved_pose("Happy_Smile", blend_factor=0.75)
+
+
+# ============================================================================
+# UNIFIED CONVENIENCE FUNCTIONS (REFACTORED API)
+# ============================================================================
+# These functions follow the unified approach outlined in REFACTOR_SPEC.md
+# Pattern 1: Direct delegation (raises exceptions)
+# Pattern 2: Safe variants (returns None/False on error)
+# Pattern 3: Workflow functions (multi-step operations)
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# Pattern 1: Core Operations (Direct delegation - raises exceptions)
+# ----------------------------------------------------------------------------
+
+def animate_poses(output_file: Optional[str] = None, 
+                 mode: Optional[ControlSelectionMode] = None,
+                 object_set_name: Optional[str] = None,
+                 driver_node: Optional[pm.PyNode] = None,
+                 **kwargs) -> List[str]:
+    """
+    Animate facial poses using driver node.
+    
+    This is a direct wrapper that raises exceptions on error for proper
+    error handling and debugging.
+    
+    Args:
+        output_file: Path to write pose names (uses default if None)
+        mode: Control selection mode (PATTERN, SELECTION, OBJECT_SET, METADATA)
+        object_set_name: Name of object set (for OBJECT_SET mode)
+        driver_node: Optional driver node to use
+        **kwargs: Additional arguments passed to animate_facial_poses()
+        
+    Returns:
+        List[str]: List of generated pose names
+        
+    Raises:
+        ControlSelectionError: If no valid controls found
+        DriverNodeError: If driver node issues occur
+        InvalidAttributeError: If animation fails
+        FileOperationError: If output file cannot be written
+        
+    Example:
+        >>> pose_names = animate_poses(mode=ControlSelectionMode.SELECTION)
+        >>> print(f"Animated {len(pose_names)} poses")
+    """
+    animator = FacialPoseAnimator()
+    output = output_file or animator.get_default_output_path()
+    return animator.animate_facial_poses(
+        output_file=output,
+        mode=mode,
+        object_set_name=object_set_name,
+        driver_node=driver_node,
+        **kwargs
+    )
+
+
+def create_driver(mode: Optional[ControlSelectionMode] = None,
+                 object_set_name: Optional[str] = None,
+                 **kwargs) -> pm.PyNode:
+    """
+    Create facial pose driver node.
+    
+    This is a direct wrapper that raises exceptions on error.
+    
+    Args:
+        mode: Control selection mode
+        object_set_name: Name of object set (for OBJECT_SET mode)
+        **kwargs: Additional arguments passed to create_facial_pose_driver()
+        
+    Returns:
+        pm.PyNode: The created driver node
+        
+    Raises:
+        ControlSelectionError: If no valid controls found
+        DriverNodeError: If driver creation fails
+        
+    Example:
+        >>> driver = create_driver(mode=ControlSelectionMode.PATTERN)
+        >>> print(f"Created driver: {driver}")
+    """
+    animator = FacialPoseAnimator()
+    return animator.create_facial_pose_driver(
+        mode=mode,
+        object_set_name=object_set_name,
+        **kwargs
+    )
+
+
+def reset_controls(mode: Optional[ControlSelectionMode] = None,
+                  object_set_name: Optional[str] = None,
+                  **kwargs) -> None:
+    """
+    Reset all facial controls to default values.
+    
+    This is a direct wrapper that raises exceptions on error.
+    
+    Args:
+        mode: Control selection mode
+        object_set_name: Name of object set (for OBJECT_SET mode)
+        **kwargs: Additional arguments passed to reset_all_attributes()
+        
+    Raises:
+        ControlSelectionError: If no valid controls found
+        InvalidAttributeError: If reset fails
+        
+    Example:
+        >>> reset_controls(mode=ControlSelectionMode.SELECTION)
+    """
+    animator = FacialPoseAnimator()
+    animator.reset_all_attributes(
+        mode=mode,
+        object_set_name=object_set_name,
+        **kwargs
+    )
+
+
+def save_pose(pose_name: str,
+             description: str = "",
+             mode: Optional[ControlSelectionMode] = None,
+             save_to_file: bool = True,
+             **kwargs) -> FacialPoseData:
+    """
+    Save a facial pose.
+    
+    This is a direct wrapper that raises exceptions on error.
+    
+    Args:
+        pose_name: Name for the pose
+        description: Optional description
+        mode: Control selection mode (uses default if None)
+        save_to_file: Whether to save to JSON file
+        **kwargs: Additional arguments (output_directory, file_path, etc.)
+        
+    Returns:
+        FacialPoseData: The saved pose data
+        
+    Raises:
+        ControlSelectionError: If no controls found
+        PoseDataError: If pose data invalid
+        FileOperationError: If file write fails (when save_to_file=True)
+        
+    Example:
+        >>> pose_data = save_pose("Smile", "Happy expression", 
+        ...                       mode=ControlSelectionMode.SELECTION)
+        >>> print(f"Saved pose with {pose_data.get_control_count()} controls")
+    """
+    animator = FacialPoseAnimator()
+    # Map to existing method for now (will be unified in next phase)
+    return animator.save_pose_from_selection(
+        pose_name=pose_name,
+        description=description,
+        use_current_selection=(mode == ControlSelectionMode.SELECTION if mode else True),
+        auto_save_to_file=save_to_file,
+        **kwargs
+    )
+
+
+def load_poses(file_path: str, overwrite_existing: bool = False, **kwargs) -> List[str]:
+    """
+    Load poses from a file.
+    
+    Auto-detects whether file contains single pose or collection.
+    This is a direct wrapper that raises exceptions on error.
+    
+    Args:
+        file_path: Path to pose file (JSON)
+        overwrite_existing: Whether to overwrite existing poses
+        **kwargs: Additional arguments
+        
+    Returns:
+        List[str]: Names of loaded poses
+        
+    Raises:
+        FileOperationError: If file cannot be read
+        PoseDataError: If file format is invalid
+        
+    Example:
+        >>> pose_names = load_poses("my_poses.json")
+        >>> print(f"Loaded {len(pose_names)} poses")
+    """
+    animator = FacialPoseAnimator()
+    # Check if it's a collection or single pose
+    try:
+        result = animator.load_single_pose_from_file(file_path, overwrite_existing)
+        if result:
+            return [result] if isinstance(result, str) else result
+    except:
+        pass
+    # Try as collection
+    return animator.import_poses_from_file(file_path, overwrite_existing) or []
+
+
+# ----------------------------------------------------------------------------
+# Pattern 2: Safe Variants (Returns None/False on error)
+# ----------------------------------------------------------------------------
+
+def safe_animate_poses(output_file: Optional[str] = None, **kwargs) -> bool:
+    """
+    Safely animate facial poses.
+    
+    Returns False on error instead of raising exceptions.
+    Logs errors automatically.
+    
+    Args:
+        output_file: Path to write pose names
+        **kwargs: Arguments passed to animate_poses()
+        
+    Returns:
+        bool: True if successful, False if failed
+        
+    Example:
+        >>> if safe_animate_poses(mode=ControlSelectionMode.SELECTION):
+        ...     print("Animation successful")
+        ... else:
+        ...     print("Animation failed")
+    """
+    try:
+        animate_poses(output_file, **kwargs)
+        return True
+    except FacialAnimatorError as e:
+        logger.error(f"Animation failed: {e}", exc_info=True)
+        return False
+
+
+def safe_create_driver(**kwargs) -> Optional[pm.PyNode]:
+    """
+    Safely create facial pose driver.
+    
+    Returns None on error instead of raising exceptions.
+    Logs errors automatically.
+    
+    Args:
+        **kwargs: Arguments passed to create_driver()
+        
+    Returns:
+        pm.PyNode or None: Driver node if successful, None if failed
+        
+    Example:
+        >>> driver = safe_create_driver(mode=ControlSelectionMode.PATTERN)
+        >>> if driver:
+        ...     print(f"Created: {driver}")
+    """
+    try:
+        return create_driver(**kwargs)
+    except FacialAnimatorError as e:
+        logger.error(f"Driver creation failed: {e}", exc_info=True)
+        return None
+
+
+def safe_reset_controls(**kwargs) -> bool:
+    """
+    Safely reset facial controls.
+    
+    Returns False on error instead of raising exceptions.
+    Logs errors automatically.
+    
+    Args:
+        **kwargs: Arguments passed to reset_controls()
+        
+    Returns:
+        bool: True if successful, False if failed
+        
+    Example:
+        >>> if safe_reset_controls(mode=ControlSelectionMode.SELECTION):
+        ...     print("Reset successful")
+    """
+    try:
+        reset_controls(**kwargs)
+        return True
+    except FacialAnimatorError as e:
+        logger.error(f"Reset failed: {e}", exc_info=True)
+        return False
+
+
+def safe_save_pose(pose_name: str, **kwargs) -> Optional[FacialPoseData]:
+    """
+    Safely save a pose.
+    
+    Returns None on error instead of raising exceptions.
+    Logs errors automatically.
+    
+    Args:
+        pose_name: Name for the pose
+        **kwargs: Arguments passed to save_pose()
+        
+    Returns:
+        FacialPoseData or None: Pose data if successful, None if failed
+        
+    Example:
+        >>> pose_data = safe_save_pose("Smile", description="Happy")
+        >>> if pose_data:
+        ...     print(f"Saved: {pose_data.name}")
+    """
+    try:
+        return save_pose(pose_name, **kwargs)
+    except FacialAnimatorError as e:
+        logger.error(f"Save failed: {e}", exc_info=True)
+        return None
+
+
+def safe_load_poses(file_path: str, **kwargs) -> Optional[List[str]]:
+    """
+    Safely load poses from file.
+    
+    Returns None on error instead of raising exceptions.
+    Logs errors automatically.
+    
+    Args:
+        file_path: Path to pose file
+        **kwargs: Arguments passed to load_poses()
+        
+    Returns:
+        List[str] or None: Pose names if successful, None if failed
+        
+    Example:
+        >>> pose_names = safe_load_poses("poses.json")
+        >>> if pose_names:
+        ...     print(f"Loaded {len(pose_names)} poses")
+    """
+    try:
+        return load_poses(file_path, **kwargs)
+    except FacialAnimatorError as e:
+        logger.error(f"Load failed: {e}", exc_info=True)
+        return None
+
+
+# ----------------------------------------------------------------------------
+# Pattern 3: Workflow Functions (Multi-step operations)
+# ----------------------------------------------------------------------------
+
+def complete_pose_workflow(
+    pose_name: str,
+    description: str = "",
+    mode: Optional[ControlSelectionMode] = None,
+    create_driver: bool = True,
+    save_to_file: bool = True,
+    export_to_collection: bool = False,
+    collection_file: Optional[str] = None,
+    output_directory: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Complete pose workflow: save pose, create driver, and optionally export.
+    
+    This combines multiple operations into a single workflow function.
+    
+    Args:
+        pose_name: Name for the pose
+        description: Optional description
+        mode: Control selection mode
+        create_driver: Whether to create driver attribute
+        save_to_file: Whether to save individual pose file
+        export_to_collection: Whether to also export to collection file
+        collection_file: Path to collection file (uses default if None)
+        output_directory: Directory for individual pose file
+        
+    Returns:
+        Dict with keys:
+            - 'pose_data': FacialPoseData or None
+            - 'driver_created': bool
+            - 'files_saved': List[str]
+            - 'success': bool
+            - 'errors': List[str]
+            
+    Example:
+        >>> result = complete_pose_workflow(
+        ...     "Smile",
+        ...     description="Happy expression",
+        ...     mode=ControlSelectionMode.SELECTION,
+        ...     create_driver=True,
+        ...     export_to_collection=True
+        ... )
+        >>> if result['success']:
+        ...     print(f"Workflow completed: {result['files_saved']}")
+    """
+    animator = FacialPoseAnimator()
+    results = {
+        'pose_data': None,
+        'driver_created': False,
+        'files_saved': [],
+        'success': False,
+        'errors': []
+    }
+    
+    try:
+        # Save pose
+        results['pose_data'] = save_pose(
+            pose_name,
+            description=description,
+            mode=mode,
+            save_to_file=save_to_file,
+            output_directory=output_directory
+        )
+        
+        if save_to_file:
+            pose_file = animator._get_pose_file_path(pose_name, output_directory)
+            results['files_saved'].append(pose_file)
+        
+        # Create driver if requested
+        if create_driver:
+            try:
+                animator.create_pose_driver_attribute(pose_name)
+                results['driver_created'] = True
+                logger.info(f"Created driver attribute for '{pose_name}'")
+            except FacialAnimatorError as e:
+                results['errors'].append(f"Driver creation failed: {e}")
+                logger.warning(f"Could not create driver attribute: {e}")
+        
+        # Export to collection if requested
+        if export_to_collection:
+            try:
+                file_path = collection_file or animator.get_default_poses_file_path()
+                animator.export_poses_to_file(file_path, [pose_name])
+                results['files_saved'].append(file_path)
+                logger.info(f"Exported to collection: {file_path}")
+            except FileOperationError as e:
+                results['errors'].append(f"Collection export failed: {e}")
+                logger.warning(f"Collection export failed: {e}")
+        
+        results['success'] = True
+        logger.info(f"Completed workflow for pose '{pose_name}'")
+        
+    except FacialAnimatorError as e:
+        results['errors'].append(f"Pose save failed: {e}")
+        logger.error(f"Workflow failed for '{pose_name}': {e}")
+    
+    return results
+
+
+# ============================================================================
+# DEPRECATED FUNCTIONS (To be removed in future version)
+# ============================================================================
+# These functions are deprecated and will be removed in version 2.0
+# Please migrate to the unified functions above
+# ============================================================================
