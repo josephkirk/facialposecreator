@@ -2492,7 +2492,19 @@ def quick_create_pose_driver(mode: Optional[ControlSelectionMode] = None,
 
 
 def quick_animate_existing_poses(output_file: Optional[str] = None):
-    """Quick function to animate existing poses."""
+    """
+    DEPRECATED: Use animate_poses() or safe_animate_poses() instead.
+    
+    .. deprecated::
+        This function will be removed in version 2.0.
+        Use animate_poses() with an existing driver node.
+    """
+    import warnings
+    warnings.warn(
+        "quick_animate_existing_poses() is deprecated. Use animate_poses() instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     animator = FacialPoseAnimator()
     default_output = animator.get_default_output_path() if output_file is None else output_file
     return animator.animate_existing_poses(default_output)
@@ -2500,38 +2512,57 @@ def quick_animate_existing_poses(output_file: Optional[str] = None):
 
 def create_facial_control_set_from_selection(set_name: str = "FacialControls_Set"):
     """
-    Quick function to create an object set from current selection.
+    DEPRECATED: Use FacialPoseAnimator().create_facial_control_set() directly.
     
-    Raises:
-        ControlSelectionError: If no valid objects are selected
-        ObjectSetError: If set creation fails
+    .. deprecated::
+        This function will be removed in version 2.0.
+        Use animator.create_facial_control_set(set_name, use_current_selection=True)
     """
+    import warnings
+    warnings.warn(
+        "create_facial_control_set_from_selection() is deprecated. "
+        "Use FacialPoseAnimator().create_facial_control_set() instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     animator = FacialPoseAnimator()
     return animator.create_facial_control_set(set_name, use_current_selection=True)
 
 
 def create_facial_control_set_from_pattern(set_name: str = "FacialControls_Set"):
     """
-    Quick function to create an object set from pattern matching.
+    DEPRECATED: Use FacialPoseAnimator().create_facial_control_set() directly.
     
-    Raises:
-        ControlSelectionError: If no controls match the pattern
-        ObjectSetError: If set creation fails
+    .. deprecated::
+        This function will be removed in version 2.0.
+        Use animator.create_facial_control_set(set_name, use_current_selection=False)
     """
+    import warnings
+    warnings.warn(
+        "create_facial_control_set_from_pattern() is deprecated. "
+        "Use FacialPoseAnimator().create_facial_control_set() instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     animator = FacialPoseAnimator()
     return animator.create_facial_control_set(set_name, use_current_selection=False)
 
 
 def quick_animate_from_set(set_name: str, output_file: Optional[str] = None):
     """
-    Quick function to animate poses using controls from an object set.
+    DEPRECATED: Use animate_poses(mode=ControlSelectionMode.OBJECT_SET) instead.
     
-    Raises:
-        ObjectSetError: If object set doesn't exist or is empty
-        ControlSelectionError: If no valid controls found in set
-        InvalidAttributeError: If animation fails
-        FileOperationError: If output file cannot be written
+    .. deprecated::
+        This function will be removed in version 2.0.
+        Use animate_poses(mode=ControlSelectionMode.OBJECT_SET, object_set_name=set_name)
     """
+    import warnings
+    warnings.warn(
+        "quick_animate_from_set() is deprecated. "
+        "Use animate_poses(mode=ControlSelectionMode.OBJECT_SET) instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     animator = FacialPoseAnimator()
     default_output = animator.get_default_output_path() if output_file is None else output_file
     return animator.animate_facial_poses(
@@ -2623,17 +2654,18 @@ def save_pose_from_selection(pose_name: str,
                            auto_save_to_file: bool = True,
                            output_directory: Optional[str] = None) -> Optional[FacialPoseData]:
     """
-    Quick function to save a pose from current selection with auto-save to file.
+    DEPRECATED: Use save_pose() or safe_save_pose() instead.
     
-    Args:
-        pose_name: Name for the pose
-        description: Optional description
-        auto_save_to_file: Whether to automatically save to JSON file
-        output_directory: Directory to save pose file (uses default if None)
-        
-    Returns:
-        FacialPoseData or None: The saved pose data, or None if failed
+    .. deprecated::
+        This function will be removed in version 2.0.
+        Use save_pose(pose_name, description, mode=ControlSelectionMode.SELECTION)
     """
+    import warnings
+    warnings.warn(
+        "save_pose_from_selection() is deprecated. Use save_pose() or safe_save_pose() instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     try:
         animator = FacialPoseAnimator()
         return animator.save_pose_from_selection(
@@ -2653,17 +2685,18 @@ def save_pose_from_all_controls(pose_name: str,
                               auto_save_to_file: bool = True,
                               output_directory: Optional[str] = None) -> Optional[FacialPoseData]:
     """
-    Quick function to save a pose from all valid facial controls with auto-save to file.
+    DEPRECATED: Use save_pose() or safe_save_pose() instead.
     
-    Args:
-        pose_name: Name for the pose
-        description: Optional description
-        auto_save_to_file: Whether to automatically save to JSON file
-        output_directory: Directory to save pose file (uses default if None)
-        
-    Returns:
-        FacialPoseData or None: The saved pose data, or None if failed
+    .. deprecated::
+        This function will be removed in version 2.0.
+        Use save_pose(pose_name, description, mode=ControlSelectionMode.PATTERN)
     """
+    import warnings
+    warnings.warn(
+        "save_pose_from_all_controls() is deprecated. Use save_pose() or safe_save_pose() instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     try:
         animator = FacialPoseAnimator()
         return animator.save_pose_from_selection(
@@ -2680,6 +2713,12 @@ def save_pose_from_all_controls(pose_name: str,
 
 def apply_saved_pose(pose_name: str, blend_factor: float = 1.0) -> bool:
     """
+    DEPRECATED: Use FacialPoseAnimator().apply_saved_pose() directly.
+    
+    .. deprecated::
+        This function will be removed in version 2.0.
+        Use animator = FacialPoseAnimator(); animator.apply_saved_pose(pose_name, blend_factor)
+    
     Quick function to apply a saved pose.
     
     Args:
@@ -2689,6 +2728,12 @@ def apply_saved_pose(pose_name: str, blend_factor: float = 1.0) -> bool:
     Returns:
         bool: True if successful, False otherwise
     """
+    import warnings
+    warnings.warn(
+        "Module-level apply_saved_pose() is deprecated. Use FacialPoseAnimator().apply_saved_pose() instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     try:
         animator = FacialPoseAnimator()
         return animator.apply_saved_pose(pose_name, blend_factor)
@@ -2699,17 +2744,35 @@ def apply_saved_pose(pose_name: str, blend_factor: float = 1.0) -> bool:
 
 def list_saved_poses() -> List[Dict[str, Any]]:
     """
+    DEPRECATED: Use FacialPoseAnimator().list_saved_poses() directly.
+    
+    .. deprecated::
+        This function will be removed in version 2.0.
+        Use animator = FacialPoseAnimator(); animator.list_saved_poses()
+    
     Quick function to list all saved poses.
     
     Returns:
         List[Dict[str, Any]]: List of pose information
     """
+    import warnings
+    warnings.warn(
+        "Module-level list_saved_poses() is deprecated. Use FacialPoseAnimator().list_saved_poses() instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     animator = FacialPoseAnimator()
     return animator.list_saved_poses()
 
 
 def export_poses_to_file(file_path: Optional[str] = None, pose_names: Optional[List[str]] = None) -> bool:
     """
+    DEPRECATED: Use FacialPoseAnimator().export_poses_to_file() directly.
+    
+    .. deprecated::
+        This function will be removed in version 2.0.
+        Use animator = FacialPoseAnimator(); animator.export_poses_to_file(file_path, pose_names)
+    
     Quick function to export poses to file.
     
     Args:
@@ -2719,6 +2782,12 @@ def export_poses_to_file(file_path: Optional[str] = None, pose_names: Optional[L
     Returns:
         bool: True if successful, False otherwise
     """
+    import warnings
+    warnings.warn(
+        "Module-level export_poses_to_file() is deprecated. Use FacialPoseAnimator().export_poses_to_file() instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     try:
         animator = FacialPoseAnimator()
         output_path = file_path or animator.get_default_poses_file_path()
@@ -2731,6 +2800,12 @@ def export_poses_to_file(file_path: Optional[str] = None, pose_names: Optional[L
 
 def import_poses_from_file(file_path: Optional[str] = None, overwrite_existing: bool = False) -> Optional[List[str]]:
     """
+    DEPRECATED: Use load_poses() or safe_load_poses() instead.
+    
+    .. deprecated::
+        This function will be removed in version 2.0.
+        Use load_poses(file_path, overwrite_existing) for the new unified API.
+    
     Quick function to import poses from file.
     
     Args:
@@ -2740,6 +2815,12 @@ def import_poses_from_file(file_path: Optional[str] = None, overwrite_existing: 
     Returns:
         List[str] or None: List of imported pose names, or None if failed
     """
+    import warnings
+    warnings.warn(
+        "import_poses_from_file() is deprecated. Use load_poses() or safe_load_poses() instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     try:
         animator = FacialPoseAnimator()
         input_path = file_path or animator.get_default_poses_file_path()
@@ -2751,6 +2832,12 @@ def import_poses_from_file(file_path: Optional[str] = None, overwrite_existing: 
 
 def load_single_pose_from_file(file_path: str, overwrite_existing: bool = False) -> Optional[str]:
     """
+    DEPRECATED: Use load_poses() or safe_load_poses() instead.
+    
+    .. deprecated::
+        This function will be removed in version 2.0.
+        Use load_poses(file_path, overwrite_existing) which auto-detects single/collection format.
+    
     Quick function to load a single pose from file.
     
     Args:
@@ -2760,6 +2847,12 @@ def load_single_pose_from_file(file_path: str, overwrite_existing: bool = False)
     Returns:
         str or None: Name of loaded pose, or None if failed
     """
+    import warnings
+    warnings.warn(
+        "load_single_pose_from_file() is deprecated. Use load_poses() or safe_load_poses() instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     try:
         animator = FacialPoseAnimator()
         return animator.load_single_pose_from_file(file_path, overwrite_existing)
@@ -2770,6 +2863,13 @@ def load_single_pose_from_file(file_path: str, overwrite_existing: bool = False)
 
 def create_pose_driver_from_saved_poses(pose_names: Optional[List[str]] = None) -> bool:
     """
+    DEPRECATED: Use create_driver() or FacialPoseAnimator().create_pose_driver_attribute() directly.
+    
+    .. deprecated::
+        This function will be removed in version 2.0.
+        Use create_driver(pose_name) or animator.create_pose_driver_attribute(pose_name) 
+        in a loop for batch operations.
+    
     Quick function to create driver attributes for saved poses.
     
     Args:
@@ -2778,6 +2878,12 @@ def create_pose_driver_from_saved_poses(pose_names: Optional[List[str]] = None) 
     Returns:
         bool: True if any drivers were created successfully
     """
+    import warnings
+    warnings.warn(
+        "create_pose_driver_from_saved_poses() is deprecated. Use create_driver() for the new unified API.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     try:
         animator = FacialPoseAnimator()
         
@@ -2807,6 +2913,12 @@ def create_pose_driver_from_saved_poses(pose_names: Optional[List[str]] = None) 
 
 def compare_saved_poses(pose1_name: str, pose2_name: str) -> Optional[Dict[str, Any]]:
     """
+    DEPRECATED: Use FacialPoseAnimator().get_pose_comparison() directly.
+    
+    .. deprecated::
+        This function will be removed in version 2.0.
+        Use animator = FacialPoseAnimator(); animator.get_pose_comparison(pose1_name, pose2_name)
+    
     Quick function to compare two saved poses.
     
     Args:
@@ -2816,6 +2928,12 @@ def compare_saved_poses(pose1_name: str, pose2_name: str) -> Optional[Dict[str, 
     Returns:
         Dict[str, Any] or None: Comparison results, or None if failed
     """
+    import warnings
+    warnings.warn(
+        "compare_saved_poses() is deprecated. Use FacialPoseAnimator().get_pose_comparison() instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     try:
         animator = FacialPoseAnimator()
         return animator.get_pose_comparison(pose1_name, pose2_name)
@@ -2831,6 +2949,13 @@ def save_and_export_pose(pose_name: str,
                         auto_save_individual: bool = True,
                         output_directory: Optional[str] = None) -> bool:
     """
+    DEPRECATED: Use save_pose() or complete_pose_workflow() instead.
+    
+    .. deprecated::
+        This function will be removed in version 2.0.
+        Use save_pose(pose_name, description, use_selection=use_current_selection) 
+        or complete_pose_workflow() for more comprehensive workflows.
+    
     Convenience function to save a pose with auto-save and optional collection export.
     
     Args:
@@ -2844,6 +2969,12 @@ def save_and_export_pose(pose_name: str,
     Returns:
         bool: True if save succeeded
     """
+    import warnings
+    warnings.warn(
+        "save_and_export_pose() is deprecated. Use save_pose() or complete_pose_workflow() instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     try:
         animator = FacialPoseAnimator()
         
@@ -2880,6 +3011,13 @@ def quick_pose_workflow_from_selection(pose_name: str,
                                      export_to_collection: bool = True,
                                      output_directory: Optional[str] = None) -> bool:
     """
+    DEPRECATED: Use complete_pose_workflow() instead.
+    
+    .. deprecated::
+        This function will be removed in version 2.0.
+        Use complete_pose_workflow(pose_name, description, use_selection=True, 
+                                   create_driver=create_driver, save_to_file=auto_save_individual)
+    
     Complete workflow: save pose from selection with auto-save, create driver attribute, and optional collection export.
     
     Args:
@@ -2893,6 +3031,12 @@ def quick_pose_workflow_from_selection(pose_name: str,
     Returns:
         bool: True if workflow completed successfully
     """
+    import warnings
+    warnings.warn(
+        "quick_pose_workflow_from_selection() is deprecated. Use complete_pose_workflow() instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     try:
         animator = FacialPoseAnimator()
         
@@ -2932,6 +3076,13 @@ def quick_pose_workflow_from_selection(pose_name: str,
 def quick_animate_from_metadata(driver_node_name: Optional[str] = None,
                                output_file: Optional[str] = None) -> Optional[List[str]]:
     """
+    DEPRECATED: Use animate_poses(mode=ControlSelectionMode.METADATA) instead.
+    
+    .. deprecated::
+        This function will be removed in version 2.0.
+        Use animate_poses(driver_node=driver_node_name, output_file=output_file, 
+                         mode=ControlSelectionMode.METADATA)
+    
     Quick function to animate poses using controls from driver metadata.
     
     Args:
@@ -2941,6 +3092,12 @@ def quick_animate_from_metadata(driver_node_name: Optional[str] = None,
     Returns:
         List[str] or None: List of pose names, or None if failed
     """
+    import warnings
+    warnings.warn(
+        "quick_animate_from_metadata() is deprecated. Use animate_poses(mode=ControlSelectionMode.METADATA) instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     try:
         animator = FacialPoseAnimator()
         default_output = animator.get_default_output_path() if output_file is None else output_file
@@ -2959,6 +3116,13 @@ def quick_save_pose_to_named_file(pose_name: str,
                                 use_current_selection: bool = True,
                                 output_directory: Optional[str] = None) -> Optional[str]:
     """
+    DEPRECATED: Use save_pose() or save_pose_to_file() instead.
+    
+    .. deprecated::
+        This function will be removed in version 2.0.
+        Use save_pose(pose_name, description, use_selection=use_current_selection) 
+        for the new unified API.
+    
     Quick function to save pose directly to a named JSON file.
     
     Args:
@@ -2970,6 +3134,12 @@ def quick_save_pose_to_named_file(pose_name: str,
     Returns:
         str or None: Path to saved file, or None if failed
     """
+    import warnings
+    warnings.warn(
+        "quick_save_pose_to_named_file() is deprecated. Use save_pose() or save_pose_to_file() instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     try:
         animator = FacialPoseAnimator()
         
@@ -2996,6 +3166,13 @@ def quick_save_pose_to_named_file(pose_name: str,
 def batch_save_poses_from_selection_states(pose_definitions: List[Tuple[str, str]], 
                                           output_directory: Optional[str] = None) -> List[str]:
     """
+    DEPRECATED: This utility function will be removed in version 2.0.
+    
+    .. deprecated::
+        This function will be removed in version 2.0.
+        For batch operations, call save_pose() or FacialPoseAnimator().save_pose_from_selection() 
+        in a loop with your own UI/workflow logic.
+    
     Save multiple poses by manually setting controls for each pose definition.
     
     Args:
@@ -3009,6 +3186,12 @@ def batch_save_poses_from_selection_states(pose_definitions: List[Tuple[str, str
         This function expects the user to manually set up controls for each pose
         and press continue when ready to capture each pose.
     """
+    import warnings
+    warnings.warn(
+        "batch_save_poses_from_selection_states() is deprecated. Implement batch logic using save_pose() directly.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     saved_files = []
     
     try:
@@ -3044,6 +3227,13 @@ def batch_save_poses_from_selection_states(pose_definitions: List[Tuple[str, str
 
 def get_pose_files_in_directory(directory: Optional[str] = None) -> List[str]:
     """
+    DEPRECATED: This utility function will be removed in version 2.0.
+    
+    .. deprecated::
+        This function will be removed in version 2.0.
+        Use standard Python os/pathlib functions to search for .json files 
+        and validate with your own logic.
+    
     Get list of pose JSON files in a directory.
     
     Args:
@@ -3052,6 +3242,12 @@ def get_pose_files_in_directory(directory: Optional[str] = None) -> List[str]:
     Returns:
         List[str]: List of pose file paths
     """
+    import warnings
+    warnings.warn(
+        "get_pose_files_in_directory() is deprecated. Use standard Python file system functions instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     try:
         animator = FacialPoseAnimator()
         
@@ -3086,6 +3282,13 @@ def get_pose_files_in_directory(directory: Optional[str] = None) -> List[str]:
 def load_all_poses_from_directory(directory: Optional[str] = None, 
                                  overwrite_existing: bool = False) -> List[str]:
     """
+    DEPRECATED: This utility function will be removed in version 2.0.
+    
+    .. deprecated::
+        This function will be removed in version 2.0.
+        Use load_poses() or safe_load_poses() on individual files, or iterate 
+        through files with your own logic.
+    
     Load all pose files from a directory.
     
     Args:
@@ -3095,6 +3298,12 @@ def load_all_poses_from_directory(directory: Optional[str] = None,
     Returns:
         List[str]: List of loaded pose names
     """
+    import warnings
+    warnings.warn(
+        "load_all_poses_from_directory() is deprecated. Use load_poses() on individual files instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     try:
         pose_files = get_pose_files_in_directory(directory)
         loaded_poses = []
