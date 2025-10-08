@@ -13,6 +13,7 @@ __version__ = "1.0.0"
 
 import os
 import json
+import warnings
 import pymel.core as pm
 from typing import List, Dict, Tuple, Optional, Any, Union, Set
 from enum import Enum
@@ -3945,12 +3946,16 @@ def safe_register_control_to_driver(control: Union[pm.PyNode, str],
         return None
 
 
-def safe_register_selected_control_to_driver(driver_node_name: Optional[str] = None,
-                                             update_metadata: bool = True) -> Optional[Dict[str, Any]]:
+def safe_register_selected_to_driver(driver_node_name: Optional[str] = None,
+                                    update_metadata: bool = True) -> Optional[Dict[str, Any]]:
     """
-    Safely register the currently selected control to the driver node.
+    Safely register selected items (controls or object sets) to the driver node.
     
-    Uses the current Maya selection to get the control to register.
+    This unified function intelligently handles both scenarios:
+    - If selection contains Transform nodes: registers each as individual control
+    - If selection contains ObjectSet nodes: registers all members from each set
+    - If selection contains mix: processes both transforms and object sets
+    
     Returns None on error instead of raising exceptions.
     Logs errors automatically.
     
@@ -3962,41 +3967,260 @@ def safe_register_selected_control_to_driver(driver_node_name: Optional[str] = N
         Dict[str, Any] or None: Results dictionary if successful, None if failed
             Dictionary contains:
                 - success: bool
-                - control_name: str
-                - pose_count: int
-                - errors: List[str]
+                - total_items: int (total selected items processed)
+                - total_controls: int (total controls registered)
+                - registered_controls: int (successfully registered)
+                - total_poses: int (total pose attributes created)
+                - controls_registered: List[str] (names of registered controls)
+                - controls_skipped: List[str] (names of skipped controls)
+                - object_sets_processed: List[str] (names of object sets processed)
+                - errors: List[str] (error messages)
         
     Example:
-        >>> # Select a control in Maya, then:
-        >>> result = safe_register_selected_control_to_driver()
+        >>> # Select one or more controls and/or object sets in Maya, then:
+        >>> result = safe_register_selected_to_driver()
         >>> if result and result['success']:
-        ...     print(f"Registered {result['control_name']}: {result['pose_count']} poses")
+        ...     print(f"Registered {result['registered_controls']}/{result['total_controls']} controls")
+        ...     print(f"Created {result['total_poses']} pose attributes")
+        
+        >>> # Select multiple controls:
+        >>> # pm.select(['L_eye_Ctrl', 'R_eye_Ctrl', 'mouth_Ctrl'])
+        >>> result = safe_register_selected_to_driver()
+        
+        >>> # Select an object set:
+        >>> # pm.select('FacialControls_Set')
+        >>> result = safe_register_selected_to_driver()
+        
+        >>> # Select mix of controls and object sets:
+        >>> # pm.select(['L_eye_Ctrl', 'FacialControls_Set', 'R_eye_Ctrl'])
+        >>> result = safe_register_selected_to_driver()
     """
     try:
         # Get current selection
         selected = pm.selected()
         if not selected:
-            logger.warning("No control selected. Please select a control to register.")
+            logger.warning("No items selected. Please select controls or object sets to register.")
             return {
                 'success': False,
-                'control_name': '',
-                'pose_count': 0,
-                'errors': ['No control selected']
+                'total_items': 0,
+                'total_controls': 0,
+                'registered_controls': 0,
+                'total_poses': 0,
+                'controls_registered': [],
+                'controls_skipped': [],
+                'object_sets_processed': [],
+                'errors': ['No items selected']
             }
         
-        # Use first selected object
-        control = selected[0]
+        # Initialize results
+        results = {
+            'success': False,
+            'total_items': len(selected),
+            'total_controls': 0,
+            'registered_controls': 0,
+            'total_poses': 0,
+            'controls_registered': [],
+            'controls_skipped': [],
+            'object_sets_processed': [],
+            'errors': []
+        }
         
-        # Register the control
+        # Create animator instance
         animator = FacialPoseAnimator()
-        return animator.register_control_to_driver(
-            control=control,
-            driver_node_name=driver_node_name,
-            update_metadata=update_metadata
-        )
+        
+        # Collect all controls to register (from both direct selection and object sets)
+        controls_to_register = []
+        
+        for item in selected:
+            if isinstance(item, pm.nt.ObjectSet):
+                # Process object set members
+                object_set_name = item.nodeName()
+                results['object_sets_processed'].append(object_set_name)
+                
+                try:
+                    members = [node for node in item.members() if isinstance(node, pm.nt.Transform)]
+                    if members:
+                        controls_to_register.extend(members)
+                        logger.info(f"Object set '{object_set_name}' contains {len(members)} transform nodes")
+                    else:
+                        warning = f"Object set '{object_set_name}' contains no transform nodes"
+                        results['errors'].append(warning)
+                        logger.warning(warning)
+                except Exception as e:
+                    error_msg = f"Failed to get members from object set '{object_set_name}': {e}"
+                    results['errors'].append(error_msg)
+                    logger.warning(error_msg)
+                    
+            elif isinstance(item, pm.nt.Transform):
+                # Add transform directly
+                controls_to_register.append(item)
+            else:
+                # Skip non-transform, non-objectset items
+                warning = f"Skipping '{item}': not a transform or object set"
+                results['errors'].append(warning)
+                logger.debug(warning)
+        
+        # Remove duplicates (in case same control is in multiple sets or selected multiple times)
+        unique_controls = []
+        seen_names = set()
+        for ctrl in controls_to_register:
+            ctrl_name = ctrl.nodeName()
+            if ctrl_name not in seen_names:
+                unique_controls.append(ctrl)
+                seen_names.add(ctrl_name)
+        
+        results['total_controls'] = len(unique_controls)
+        
+        if not unique_controls:
+            logger.warning("No valid controls found in selection")
+            results['errors'].append("No valid controls found in selection")
+            return results
+        
+        # Register each unique control
+        for control in unique_controls:
+            control_name = control.nodeName()
+            try:
+                result = animator.register_control_to_driver(
+                    control=control,
+                    driver_node_name=driver_node_name,
+                    update_metadata=False  # We'll update metadata once at the end
+                )
+                
+                if result['success']:
+                    results['registered_controls'] += 1
+                    results['total_poses'] += result['pose_count']
+                    results['controls_registered'].append(control_name)
+                    logger.info(f"Registered '{control_name}': {result['pose_count']} poses")
+                else:
+                    results['controls_skipped'].append(control_name)
+                    if result['errors']:
+                        results['errors'].extend([f"{control_name}: {err}" for err in result['errors']])
+                    logger.warning(f"Skipped '{control_name}': {', '.join(result['errors'])}")
+                    
+            except Exception as e:
+                results['controls_skipped'].append(control_name)
+                error_msg = f"{control_name}: {str(e)}"
+                results['errors'].append(error_msg)
+                logger.warning(f"Failed to register '{control_name}': {e}")
+        
+        # Update metadata once at the end if any controls were registered
+        if results['registered_controls'] > 0 and update_metadata:
+            try:
+                driver_name = driver_node_name or animator.facial_driver_node
+                if pm.objExists(driver_name):
+                    driver_node = pm.PyNode(driver_name)
+                    registered_nodes = [pm.PyNode(name) for name in results['controls_registered'] if pm.objExists(name)]
+                    
+                    # Get existing connected controls
+                    connected_controls = animator._get_connected_facial_controls(driver_node)
+                    
+                    # Only add new controls to metadata
+                    new_controls = [ctrl for ctrl in registered_nodes if ctrl not in connected_controls]
+                    if new_controls:
+                        animator._create_metadata_connections(driver_node, new_controls)
+                        logger.info(f"Updated driver metadata with {len(new_controls)} new controls")
+                        
+            except Exception as meta_error:
+                error_msg = f"Warning: Could not update metadata: {meta_error}"
+                results['errors'].append(error_msg)
+                logger.warning(error_msg)
+        
+        # Set success flag
+        results['success'] = results['registered_controls'] > 0
+        
+        if results['success']:
+            summary = f"Registered {results['registered_controls']}/{results['total_controls']} controls " \
+                     f"with {results['total_poses']} total poses"
+            if results['object_sets_processed']:
+                summary += f" (from {len(results['object_sets_processed'])} object set(s))"
+            logger.info(summary)
+        else:
+            logger.warning("No controls were successfully registered")
+        
+        return results
+        
     except FacialAnimatorError as e:
-        logger.error(f"Failed to register selected control: {e}", exc_info=True)
+        logger.error(f"Failed to register selected items: {e}", exc_info=True)
         return None
+
+
+# Backward compatibility aliases
+def safe_register_selected_control_to_driver(driver_node_name: Optional[str] = None,
+                                             update_metadata: bool = True) -> Optional[Dict[str, Any]]:
+    """
+    DEPRECATED: Use safe_register_selected_to_driver() instead.
+    
+    .. deprecated::
+        This function is deprecated and will be removed in version 2.0.
+        Use safe_register_selected_to_driver() which handles both controls and object sets.
+    
+    Safely register the currently selected control to the driver node.
+    """
+    warnings.warn(
+        "safe_register_selected_control_to_driver() is deprecated. "
+        "Use safe_register_selected_to_driver() instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    return safe_register_selected_to_driver(driver_node_name, update_metadata)
+
+
+def safe_register_selected_object_set_to_driver(object_set_name: Optional[str] = None,
+                                                driver_node_name: Optional[str] = None,
+                                                update_metadata: bool = True) -> Optional[Dict[str, Any]]:
+    """
+    DEPRECATED: Use safe_register_selected_to_driver() instead.
+    
+    .. deprecated::
+        This function is deprecated and will be removed in version 2.0.
+        Use safe_register_selected_to_driver() which handles both controls and object sets.
+    
+    Safely register all controls from a Maya object set to the driver node.
+    
+    If object_set_name is not provided, uses the first selected object set.
+    Returns None on error instead of raising exceptions.
+    Logs errors automatically.
+    
+    Args:
+        object_set_name: Name of the Maya object set (uses selection if None)
+        driver_node_name: Name of the driver node (uses default if None)
+        update_metadata: Whether to update metadata connections (default: True)
+        
+    Returns:
+        Dict[str, Any] or None: Results dictionary if successful, None if failed
+    """
+    warnings.warn(
+        "safe_register_selected_object_set_to_driver() is deprecated. "
+        "Use safe_register_selected_to_driver() instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    
+    # If object_set_name provided, select it first
+    if object_set_name is not None:
+        if pm.objExists(object_set_name):
+            pm.select(object_set_name, replace=True)
+        else:
+            logger.error(f"Object set '{object_set_name}' does not exist")
+            return {
+                'success': False,
+                'object_set_name': object_set_name,
+                'total_controls': 0,
+                'registered_controls': 0,
+                'total_poses': 0,
+                'controls_registered': [],
+                'controls_skipped': [],
+                'errors': [f"Object set '{object_set_name}' does not exist"]
+            }
+    
+    # Use unified function
+    result = safe_register_selected_to_driver(driver_node_name, update_metadata)
+    
+    # Add object_set_name to result for backward compatibility
+    if result and object_set_name:
+        result['object_set_name'] = object_set_name
+    
+    return result
 
 
 def safe_reset_controls(**kwargs) -> bool:

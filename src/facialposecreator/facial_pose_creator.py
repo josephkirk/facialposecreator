@@ -73,7 +73,7 @@ try:
         safe_animate_poses,
         safe_create_driver,
         safe_register_control_to_driver,
-        safe_register_selected_control_to_driver,
+        safe_register_selected_to_driver,
         safe_save_pose,
         safe_load_poses,
     )
@@ -1436,31 +1436,35 @@ class FacialPoseCreatorUI(QMainWindow):
             self.log_message(f"ERROR: {str(e)}")
     
     def register_selected_control_to_driver(self):
-        """Register the currently selected control to the driver node."""
+        """Register the currently selected controls or object sets to the driver node."""
         if not MAYA_AVAILABLE or not self.animator:
             QMessageBox.warning(self, "Error", "Maya/Animator not available.")
             return
         
         try:
-            self.log_message("Registering selected control to driver...")
-            self.statusBar().showMessage("Registering control...")
+            self.log_message("Registering selected items to driver...")
+            self.statusBar().showMessage("Registering items...")
             
-            # Use the new safe function
-            result = safe_register_selected_control_to_driver(
+            # Use the new unified safe function
+            result = safe_register_selected_to_driver(
                 driver_node_name=self.driver_name_edit.text(),
                 update_metadata=True
             )
             
             if result and result.get('success'):
-                control_name = result.get('control_name', 'Unknown')
-                pose_count = result.get('pose_count', 0)
+                total_controls = result.get('total_controls', 0)
+                registered = result.get('registered_controls', 0)
+                total_poses = result.get('total_poses', 0)
+                object_sets = result.get('object_sets_processed', [])
                 
-                success_msg = f"Successfully registered control: {control_name}\n"
-                success_msg += f"Created {pose_count} pose attributes"
+                success_msg = f"Successfully registered {registered}/{total_controls} controls\n"
+                success_msg += f"Created {total_poses} pose attributes"
+                if object_sets:
+                    success_msg += f"\nProcessed object sets: {', '.join(object_sets)}"
                 
                 QMessageBox.information(self, "Success", success_msg)
-                self.log_message(f"Registered {control_name}: {pose_count} poses created")
-                self.statusBar().showMessage("Control registered successfully", 3000)
+                self.log_message(f"Registered {registered} controls: {total_poses} poses created")
+                self.statusBar().showMessage("Items registered successfully", 3000)
                 
                 # Refresh the driver status display
                 self.update_driver_status_display()
@@ -1469,14 +1473,14 @@ class FacialPoseCreatorUI(QMainWindow):
                 self.refresh_driver_attributes()
             else:
                 errors = result.get('errors', ['Unknown error']) if result else ['No selection or operation failed']
-                error_msg = "Failed to register control:\n" + "\n".join(errors)
+                error_msg = "Failed to register items:\n" + "\n".join(errors[:5])  # Show first 5 errors
                 
                 QMessageBox.warning(self, "Warning", error_msg)
-                self.log_message(f"Failed to register control: {errors[0]}")
-                self.statusBar().showMessage("Control registration failed", 3000)
+                self.log_message(f"Failed to register items: {errors[0]}")
+                self.statusBar().showMessage("Registration failed", 3000)
                 
         except Exception as e:
-            error_msg = f"Error registering control: {str(e)}"
+            error_msg = f"Error registering items: {str(e)}"
             QMessageBox.critical(self, "Error", error_msg)
             self.log_message(f"ERROR: {error_msg}")
             self.statusBar().showMessage("Error occurred", 3000)
