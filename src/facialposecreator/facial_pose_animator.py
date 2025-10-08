@@ -9,6 +9,8 @@ Author: Nguyen Phi Hung
 Date: September 30, 2025
 """
 
+__version__ = "1.0.0"
+
 import os
 import json
 import pymel.core as pm
@@ -344,6 +346,12 @@ class FacialPoseAnimator:
         """
         Check if an attribute is valid for animation.
         
+        An attribute is valid if it:
+        - Is not locked, connected, or hidden
+        - Is a double type
+        - Is not in the excluded attributes list
+        - Has a corresponding entry in limit_type_map OR has custom limits defined
+        
         Args:
             attribute: PyMEL attribute to check
             
@@ -355,8 +363,23 @@ class FacialPoseAnimator:
             attribute.isHidden() or
             'double' not in attribute.get(type=True)):
             return False
-            
-        return attribute.longName() not in self.excluded_attributes
+        
+        attr_name = attribute.longName()
+        
+        # Check if attribute is in excluded list
+        if attr_name in self.excluded_attributes:
+            return False
+        
+        # Check if we have a way to query limits for this attribute
+        # Either it's in limit_type_map or has custom limits defined
+        if attr_name in self.custom_limits:
+            return True
+        
+        # Check if any key in limit_type_map matches this attribute name
+        # (using 'in' to allow partial matches like 'translateX' in 'ctrl.translateX')
+        has_limit_mapping = any(limit_attr in attr_name for limit_attr in self.limit_type_map.keys())
+        
+        return has_limit_mapping
     
     def _get_attribute_range(self, control: pm.PyNode, attribute: pm.Attribute) -> List[float]:
         """
@@ -1374,6 +1397,125 @@ class FacialPoseAnimator:
                     logger.warning("Driver node creation failed, cleanup will remove the created node.")
                 raise
     
+    def register_control_to_driver(self, 
+                                   control: Union[pm.PyNode, str],
+                                   driver_node_name: Optional[str] = None,
+                                   update_metadata: bool = True) -> Dict[str, Any]:
+        """
+        Register a single control to the driver node by creating pose attributes for all its valid attributes.
+        
+        This is a public method that can be called from the UI to add individual controls to an existing driver.
+        
+        Args:
+            control: The control node (PyNode or string name) to register
+            driver_node_name: Name of the driver node (uses default if None)
+            update_metadata: Whether to update metadata connections (default: True)
+            
+        Returns:
+            Dict[str, Any]: Results dictionary with keys:
+                - success: bool - Whether registration was successful
+                - control_name: str - Name of the control
+                - pose_count: int - Number of pose attributes created
+                - errors: List[str] - List of error messages (if any)
+                
+        Raises:
+            DriverNodeError: If driver node doesn't exist
+            ControlSelectionError: If control is invalid
+            
+        Example:
+            >>> result = animator.register_control_to_driver("L_eye_Ctrl")
+            >>> if result['success']:
+            ...     print(f"Registered {result['pose_count']} poses for {result['control_name']}")
+        """
+        node_name = driver_node_name or self.facial_driver_node
+        
+        result = {
+            'success': False,
+            'control_name': str(control),
+            'pose_count': 0,
+            'errors': []
+        }
+        
+        try:
+            # Get or validate driver node
+            if not pm.objExists(node_name):
+                raise DriverNodeError(f"Driver node '{node_name}' does not exist. Create it first.")
+            
+            driver_node = pm.PyNode(node_name)
+            
+            # Convert control to PyNode if it's a string
+            if isinstance(control, str):
+                if not pm.objExists(control):
+                    raise ControlSelectionError(f"Control '{control}' does not exist in the scene.")
+                control = pm.PyNode(control)
+            
+            # Validate it's a transform node
+            if not isinstance(control, pm.nt.Transform):
+                raise ControlSelectionError(f"Control '{control}' is not a transform node.")
+            
+            # Validate control
+            if not self._is_valid_control(control):
+                raise ControlSelectionError(f"Control '{control}' is not valid (excluded by naming rules).")
+            
+            result['control_name'] = control.nodeName()
+            
+            with self.undo_chunk_context(f"Register Control: {control.nodeName()}"):
+                pose_count = 0
+                
+                # Process each valid attribute
+                for attr in control.listAttr(k=True, v=True):
+                    if not self._is_valid_attribute(attr):
+                        continue
+                    
+                    try:
+                        attr_range = self._get_attribute_range(control, attr)
+                        if not attr_range:
+                            logger.debug(f"No valid range for {attr}, skipping")
+                            continue
+                        
+                        created = self._create_driver_attributes(
+                            driver_node, control, attr, attr_range
+                        )
+                        pose_count += created
+                        
+                    except Exception as e:
+                        error_msg = f"Error creating driver for {attr}: {e}"
+                        result['errors'].append(error_msg)
+                        logger.warning(error_msg)
+                
+                if pose_count == 0:
+                    result['errors'].append("No pose attributes were created (all attributes may already exist or have no valid range)")
+                    logger.warning(f"No new pose attributes created for control '{control.nodeName()}'")
+                else:
+                    result['success'] = True
+                    result['pose_count'] = pose_count
+                    
+                    # Update metadata connections if requested
+                    if update_metadata:
+                        try:
+                            # Check if control already in metadata
+                            connected_controls = self._get_connected_facial_controls(driver_node)
+                            if control not in connected_controls:
+                                self._create_metadata_connections(driver_node, [control])
+                                logger.info(f"Added '{control.nodeName()}' to driver metadata")
+                        except Exception as meta_error:
+                            error_msg = f"Warning: Could not update metadata: {meta_error}"
+                            result['errors'].append(error_msg)
+                            logger.warning(error_msg)
+                    
+                    logger.info(f"Successfully registered control '{control.nodeName()}' with {pose_count} pose attributes")
+            
+            return result
+            
+        except (DriverNodeError, ControlSelectionError) as e:
+            result['errors'].append(str(e))
+            logger.error(f"Failed to register control '{control}': {e}")
+            raise
+        except Exception as e:
+            result['errors'].append(f"Unexpected error: {e}")
+            logger.error(f"Unexpected error registering control '{control}': {e}")
+            raise ControlSelectionError(f"Failed to register control '{control}': {e}") from e
+    
     def _create_driver_attributes(self, driver_node: pm.PyNode, control: pm.PyNode, 
                                 attribute: pm.Attribute, value_range: List[float]) -> int:
         """
@@ -1675,20 +1817,35 @@ class FacialPoseAnimator:
             driver_node_name: Name of the driver node (uses default if None)
             
         Returns:
-            Dict[str, Any]: Metadata information
+            Dict[str, Any]: Metadata information with keys:
+                - driver_node: Name of the driver node
+                - exists: Whether the driver node exists (alias for driver_exists)
+                - driver_exists: Whether the driver node exists
+                - has_metadata: Whether metadata connections exist
+                - connected_controls: List of connected control names
+                - connected_controls_count: Number of connected controls
+                - pose_attributes: List of pose attribute names
+                - pose_attributes_count: Number of pose attributes
+                - validation: Validation results
         """
         node_name = driver_node_name or self.facial_driver_node
         
         metadata_info = {
+            "driver_node": node_name,
             "driver_exists": False,
+            "exists": False,  # Alias for UI compatibility
             "has_metadata": False,
             "connected_controls": [],
+            "connected_controls_count": 0,
+            "pose_attributes": [],
+            "pose_attributes_count": 0,
             "validation": {}
         }
         
         try:
             if pm.objExists(node_name):
                 metadata_info["driver_exists"] = True
+                metadata_info["exists"] = True  # Alias for UI compatibility
                 driver_node = pm.PyNode(node_name)
                 
                 # Check for metadata attribute
@@ -1698,9 +1855,20 @@ class FacialPoseAnimator:
                     # Get connected controls
                     connected_controls = self._get_connected_facial_controls(driver_node)
                     metadata_info["connected_controls"] = [str(ctrl) for ctrl in connected_controls]
+                    metadata_info["connected_controls_count"] = len(connected_controls)
                     
                     # Get validation info
                     metadata_info["validation"] = self._validate_metadata_connections(driver_node)
+                
+                # Get pose attributes (all keyable attributes with connections)
+                try:
+                    pose_info_list = self._get_driver_pose_attributes(driver_node)
+                    pose_attr_names = [info['pose_name'] for info in pose_info_list]
+                    metadata_info["pose_attributes"] = pose_attr_names
+                    metadata_info["pose_attributes_count"] = len(pose_attr_names)
+                except Exception as pose_error:
+                    logger.debug(f"Could not get pose attributes: {pose_error}")
+                    # Leave as empty list if no pose attributes
             
             return metadata_info
             
@@ -3648,6 +3816,99 @@ def safe_create_driver(**kwargs) -> Optional[pm.PyNode]:
         return create_driver(**kwargs)
     except FacialAnimatorError as e:
         logger.error(f"Driver creation failed: {e}", exc_info=True)
+        return None
+
+
+def safe_register_control_to_driver(control: Union[pm.PyNode, str], 
+                                    driver_node_name: Optional[str] = None,
+                                    update_metadata: bool = True) -> Optional[Dict[str, Any]]:
+    """
+    Safely register a single control to the driver node.
+    
+    Returns None on error instead of raising exceptions.
+    Logs errors automatically.
+    
+    Args:
+        control: The control node (PyNode or string name) to register
+        driver_node_name: Name of the driver node (uses default if None)
+        update_metadata: Whether to update metadata connections (default: True)
+        
+    Returns:
+        Dict[str, Any] or None: Results dictionary if successful, None if failed
+            Dictionary contains:
+                - success: bool
+                - control_name: str
+                - pose_count: int
+                - errors: List[str]
+        
+    Example:
+        >>> result = safe_register_control_to_driver("L_eye_Ctrl")
+        >>> if result and result['success']:
+        ...     print(f"Registered {result['pose_count']} poses")
+    """
+    try:
+        animator = FacialPoseAnimator()
+        return animator.register_control_to_driver(
+            control=control,
+            driver_node_name=driver_node_name,
+            update_metadata=update_metadata
+        )
+    except FacialAnimatorError as e:
+        logger.error(f"Failed to register control '{control}': {e}", exc_info=True)
+        return None
+
+
+def safe_register_selected_control_to_driver(driver_node_name: Optional[str] = None,
+                                             update_metadata: bool = True) -> Optional[Dict[str, Any]]:
+    """
+    Safely register the currently selected control to the driver node.
+    
+    Uses the current Maya selection to get the control to register.
+    Returns None on error instead of raising exceptions.
+    Logs errors automatically.
+    
+    Args:
+        driver_node_name: Name of the driver node (uses default if None)
+        update_metadata: Whether to update metadata connections (default: True)
+        
+    Returns:
+        Dict[str, Any] or None: Results dictionary if successful, None if failed
+            Dictionary contains:
+                - success: bool
+                - control_name: str
+                - pose_count: int
+                - errors: List[str]
+        
+    Example:
+        >>> # Select a control in Maya, then:
+        >>> result = safe_register_selected_control_to_driver()
+        >>> if result and result['success']:
+        ...     print(f"Registered {result['control_name']}: {result['pose_count']} poses")
+    """
+    try:
+        # Get current selection
+        selected = pm.selected()
+        if not selected:
+            logger.warning("No control selected. Please select a control to register.")
+            return {
+                'success': False,
+                'control_name': '',
+                'pose_count': 0,
+                'errors': ['No control selected']
+            }
+        
+        # Use first selected object
+        control = selected[0]
+        
+        # Register the control
+        animator = FacialPoseAnimator()
+        return animator.register_control_to_driver(
+            control=control,
+            driver_node_name=driver_node_name,
+            update_metadata=update_metadata
+        )
+    except FacialAnimatorError as e:
+        logger.error(f"Failed to register selected control: {e}", exc_info=True)
         return None
 
 

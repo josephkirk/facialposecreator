@@ -57,6 +57,8 @@ try:
     from . import facial_pose_animator
     # Import the new unified API functions
     from .facial_pose_animator import (
+        # Version constant
+        __version__,
         # Exception classes for proper error handling
         FacialAnimatorError,
         ControlSelectionError,
@@ -70,6 +72,8 @@ try:
         # New unified convenience functions (safe variants for UI)
         safe_animate_poses,
         safe_create_driver,
+        safe_register_control_to_driver,
+        safe_register_selected_control_to_driver,
         safe_save_pose,
         safe_load_poses,
     )
@@ -179,7 +183,16 @@ class FacialPoseCreatorUI(QMainWindow):
         self.setObjectName("FacialPoseCreatorUI")
         self.resize(900, 700)
         self.setMinimumSize(900, 700)
-        self.setWindowTitle("Facial Pose Creator")
+        
+        # Set window title with version
+        window_title = "Facial Pose Creator"
+        if MAYA_AVAILABLE and 'facial_pose_animator' in globals():
+            try:
+                window_title = f"Facial Pose Creator v{__version__}"
+            except:
+                pass
+        self.setWindowTitle(window_title)
+        
         self.animator = None
         
         self.init_animator()
@@ -203,7 +216,14 @@ class FacialPoseCreatorUI(QMainWindow):
     
     def init_ui(self):
         """Initialize the user interface."""
-        self.setWindowTitle("Facial Pose Creator")
+        # Update window title with version
+        window_title = "Facial Pose Creator"
+        if MAYA_AVAILABLE and 'facial_pose_animator' in globals():
+            try:
+                window_title = f"Facial Pose Creator v{__version__}"
+            except:
+                pass
+        self.setWindowTitle(window_title)
         self.setMinimumSize(900, 700)
         
         # Central widget
@@ -600,6 +620,28 @@ class FacialPoseCreatorUI(QMainWindow):
         
         info_group.setLayout(info_layout)
         layout.addWidget(info_group)
+        
+        # Register Control group
+        register_group = QGroupBox("Register Control to Driver")
+        register_layout = QVBoxLayout()
+        
+        register_info_label = QLabel(
+            "Select a control in Maya, then click the button below to register it to the driver node.\n"
+            "This will create pose attributes for all valid attributes of the selected control."
+        )
+        register_info_label.setWordWrap(True)
+        register_layout.addWidget(register_info_label)
+        
+        self.register_selected_control_btn = QPushButton("Register Selected Control")
+        self.register_selected_control_btn.setToolTip(
+            "Register the currently selected control to the driver node.\n"
+            "Creates pose attributes for all valid attributes."
+        )
+        self.register_selected_control_btn.clicked.connect(self.register_selected_control_to_driver)
+        register_layout.addWidget(self.register_selected_control_btn)
+        
+        register_group.setLayout(register_layout)
+        layout.addWidget(register_group)
         
         # Driver attributes group
         attrs_group = QGroupBox("Driver Attributes")
@@ -1392,6 +1434,52 @@ class FacialPoseCreatorUI(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to refresh attributes: {str(e)}")
             self.log_message(f"ERROR: {str(e)}")
+    
+    def register_selected_control_to_driver(self):
+        """Register the currently selected control to the driver node."""
+        if not MAYA_AVAILABLE or not self.animator:
+            QMessageBox.warning(self, "Error", "Maya/Animator not available.")
+            return
+        
+        try:
+            self.log_message("Registering selected control to driver...")
+            self.statusBar().showMessage("Registering control...")
+            
+            # Use the new safe function
+            result = safe_register_selected_control_to_driver(
+                driver_node_name=self.driver_name_edit.text(),
+                update_metadata=True
+            )
+            
+            if result and result.get('success'):
+                control_name = result.get('control_name', 'Unknown')
+                pose_count = result.get('pose_count', 0)
+                
+                success_msg = f"Successfully registered control: {control_name}\n"
+                success_msg += f"Created {pose_count} pose attributes"
+                
+                QMessageBox.information(self, "Success", success_msg)
+                self.log_message(f"Registered {control_name}: {pose_count} poses created")
+                self.statusBar().showMessage("Control registered successfully", 3000)
+                
+                # Refresh the driver status display
+                self.update_driver_status_display()
+                
+                # Refresh driver attributes list
+                self.refresh_driver_attributes()
+            else:
+                errors = result.get('errors', ['Unknown error']) if result else ['No selection or operation failed']
+                error_msg = "Failed to register control:\n" + "\n".join(errors)
+                
+                QMessageBox.warning(self, "Warning", error_msg)
+                self.log_message(f"Failed to register control: {errors[0]}")
+                self.statusBar().showMessage("Control registration failed", 3000)
+                
+        except Exception as e:
+            error_msg = f"Error registering control: {str(e)}"
+            QMessageBox.critical(self, "Error", error_msg)
+            self.log_message(f"ERROR: {error_msg}")
+            self.statusBar().showMessage("Error occurred", 3000)
     
     def test_driver_attribute(self):
         """Test the selected driver attribute."""
