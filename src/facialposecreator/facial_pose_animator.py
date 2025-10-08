@@ -152,6 +152,7 @@ class FacialPoseAnimator:
         # Metadata connection settings
         self.metadata_attr_name = "facialControlNodes"
         self.control_index_attr_prefix = "controlIndex_"
+        self.driver_identifier_attr = "isFacialPoseDriver"  # Identifies a node as a driver
         
         # Undo/cleanup tracking
         self.created_nodes: Set[str] = set()
@@ -333,6 +334,10 @@ class FacialPoseAnimator:
         """
         Check if a control node is valid for processing.
         
+        A control is invalid if:
+        - Its name contains excluded nodes
+        - It is a driver node (has driver identifier attribute)
+        
         Args:
             control: PyMEL node to check
             
@@ -340,7 +345,63 @@ class FacialPoseAnimator:
             bool: True if control is valid, False otherwise
         """
         node_name = control.nodeName()
-        return not any(excluded in node_name for excluded in self.excluded_nodes)
+        
+        # Check excluded nodes
+        if any(excluded in node_name for excluded in self.excluded_nodes):
+            return False
+        
+        # Check if this node is a driver node
+        if self._is_driver_node(control):
+            logger.debug(f"Excluding driver node from controls: {node_name}")
+            return False
+        
+        return True
+    
+    def _is_driver_node(self, node: pm.PyNode) -> bool:
+        """
+        Check if a node is a facial pose driver node.
+        
+        Args:
+            node: PyMEL node to check
+            
+        Returns:
+            bool: True if node is a driver node, False otherwise
+        """
+        try:
+            return pm.attributeQuery(self.driver_identifier_attr, node=node, exists=True)
+        except Exception:
+            return False
+    
+    def _find_existing_driver_nodes(self) -> List[pm.PyNode]:
+        """
+        Find all existing driver nodes in the scene.
+        
+        Returns:
+            List[pm.PyNode]: List of driver nodes found in the scene
+        """
+        try:
+            all_transforms = pm.ls(type='transform')
+            driver_nodes = [node for node in all_transforms if self._is_driver_node(node)]
+            return driver_nodes
+        except Exception as e:
+            logger.warning(f"Error searching for existing driver nodes: {e}")
+            return []
+    
+    def _mark_as_driver_node(self, node: pm.PyNode) -> None:
+        """
+        Mark a node as a facial pose driver by adding the identifier attribute.
+        
+        Args:
+            node: The node to mark as a driver
+        """
+        try:
+            if not pm.attributeQuery(self.driver_identifier_attr, node=node, exists=True):
+                pm.addAttr(node, ln=self.driver_identifier_attr, at='bool', dv=True)
+                pm.setAttr(f"{node}.{self.driver_identifier_attr}", lock=True)
+                self._track_created_attribute(node, self.driver_identifier_attr)
+                logger.info(f"Marked node as driver: {node}")
+        except Exception as e:
+            logger.warning(f"Failed to mark node as driver: {e}")
     
     def _is_valid_attribute(self, attribute: pm.Attribute) -> bool:
         """
@@ -1335,6 +1396,9 @@ class FacialPoseAnimator:
         """
         Create a facial pose driver node with connected attributes.
         
+        Only one driver node should exist per scene. This method will check for
+        existing driver nodes and warn if found.
+        
         Args:
             mode: Selection mode (PATTERN, SELECTION, or OBJECT_SET)
             object_set_name: Name of Maya object set to use (when mode is OBJECT_SET)
@@ -1344,24 +1408,47 @@ class FacialPoseAnimator:
             pm.PyNode: The created driver node
             
         Raises:
-            DriverNodeError: If driver node creation fails
+            DriverNodeError: If driver node creation fails or multiple drivers exist
             ControlSelectionError: If no valid controls found
         """
         with self.undo_chunk_context("Create Facial Pose Driver"):
             logger.info("Creating facial pose driver...")
             
-            # Create or get the driver node
-            driver_node_created = False
-            try:
-                if not pm.ls(self.facial_driver_node):
-                    driver_node = pm.createNode("transform", name=self.facial_driver_node)
-                    self._track_created_node(driver_node)
-                    driver_node_created = True
+            # Check for existing driver nodes in the scene
+            existing_drivers = self._find_existing_driver_nodes()
+            if existing_drivers:
+                existing_names = [str(node) for node in existing_drivers]
+                if len(existing_drivers) > 1:
+                    raise DriverNodeError(
+                        f"Multiple driver nodes found in scene: {existing_names}. "
+                        "Only one driver node should exist per scene. Please delete extras."
+                    )
                 else:
-                    driver_node = pm.PyNode(self.facial_driver_node)
-                    
-            except Exception as e:
-                raise DriverNodeError(f"Failed to create or access facial driver node '{self.facial_driver_node}': {e}") from e
+                    logger.warning(
+                        f"Existing driver node found: {existing_names[0]}. "
+                        "Using existing driver node instead of creating new one."
+                    )
+                    driver_node = existing_drivers[0]
+                    driver_node_created = False
+            else:
+                # Create or get the driver node
+                driver_node_created = False
+                try:
+                    if not pm.ls(self.facial_driver_node):
+                        driver_node = pm.createNode("transform", name=self.facial_driver_node)
+                        self._track_created_node(driver_node)
+                        driver_node_created = True
+                        
+                        # Mark as driver node
+                        self._mark_as_driver_node(driver_node)
+                    else:
+                        driver_node = pm.PyNode(self.facial_driver_node)
+                        # Ensure it's marked as driver
+                        if not self._is_driver_node(driver_node):
+                            self._mark_as_driver_node(driver_node)
+                        
+                except Exception as e:
+                    raise DriverNodeError(f"Failed to create or access facial driver node '{self.facial_driver_node}': {e}") from e
             
             controls = self.get_facial_controls(mode=mode, object_set_name=object_set_name, use_selection=use_selection)
             pose_count = 0
