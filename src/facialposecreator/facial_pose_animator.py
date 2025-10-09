@@ -593,6 +593,9 @@ class FacialPoseAnimator:
         """
         Create metadata connections between driver node and facial control nodes.
         
+        Ensures uniqueness: No control will be connected to multiple metadata indices.
+        If a control is already connected, it will be skipped.
+        
         Args:
             driver_node: The facial pose driver node
             control_nodes: List of facial control nodes to connect
@@ -604,9 +607,54 @@ class FacialPoseAnimator:
                 self._track_created_attribute(driver_node, self.metadata_attr_name)
                 logger.debug(f"Created metadata attribute: {driver_node}.{self.metadata_attr_name}")
             
+            # Get currently connected controls to ensure uniqueness
+            existing_controls = self._get_connected_facial_controls(driver_node)
+            existing_control_names = {ctrl.nodeName() for ctrl in existing_controls}
+            
+            # Find the highest used index in the metadata array
+            metadata_attr = driver_node.attr(self.metadata_attr_name)
+            used_indices = metadata_attr.getArrayIndices() if metadata_attr.isArray() else []
+            next_available_index = max(used_indices) + 1 if used_indices else 0
+            
+            logger.debug(f"Next available metadata index: {next_available_index}")
+            logger.debug(f"Already connected controls: {len(existing_control_names)}")
+            
             # Create individual control index attributes and connections
-            for index, control in enumerate(control_nodes):
-                control_index_attr = f"{self.control_index_attr_prefix}{index}"
+            current_index = next_available_index
+            skipped_count = 0
+            
+            for control in control_nodes:
+                control_name = control.nodeName()
+                
+                # UNIQUENESS CHECK 1: Check if control is in our existing controls list
+                if control_name in existing_control_names:
+                    logger.debug(f"Control {control_name} already connected to driver, skipping")
+                    skipped_count += 1
+                    continue
+                
+                # UNIQUENESS CHECK 2: Verify control.message isn't connected to any metadata array index
+                # This is a safety check in case the control list query missed something
+                control_message = control.attr('message')
+                existing_connections = control_message.outputs(plugs=True)
+                
+                is_already_connected = False
+                for conn in existing_connections:
+                    # Check if connected to this driver's metadata array
+                    if conn.node() == driver_node and self.metadata_attr_name in conn.name():
+                        logger.warning(
+                            f"Control {control_name} has existing connection to {conn.name()}, "
+                            "ensuring uniqueness by skipping"
+                        )
+                        is_already_connected = True
+                        skipped_count += 1
+                        # Add to existing set to prevent further checks
+                        existing_control_names.add(control_name)
+                        break
+                
+                if is_already_connected:
+                    continue
+                
+                control_index_attr = f"{self.control_index_attr_prefix}{current_index}"
                 
                 # Create control index attribute on driver node if it doesn't exist
                 if not pm.attributeQuery(control_index_attr, node=driver_node, exists=True):
@@ -623,29 +671,42 @@ class FacialPoseAnimator:
                 try:
                     # Connect control to driver's main metadata array
                     source_attr = f"{control}.message"
-                    dest_attr = f"{driver_node}.{self.metadata_attr_name}[{index}]"
-                    if not pm.isConnected(source_attr, dest_attr):
-                        pm.connectAttr(source_attr, dest_attr)
+                    dest_attr = f"{driver_node}.{self.metadata_attr_name}[{current_index}]"
+                    
+                    # Final safety check before connecting
+                    if pm.isConnected(source_attr, dest_attr):
+                        logger.debug(f"Connection {source_attr} -> {dest_attr} already exists")
+                    else:
+                        pm.connectAttr(source_attr, dest_attr, force=False)
                         self._track_created_connection(source_attr, dest_attr)
                         logger.debug(f"Connected metadata: {source_attr} -> {dest_attr}")
                     
                     # Connect control to driver's individual control index attribute
                     dest_attr = f"{driver_node}.{control_index_attr}"
                     if not pm.isConnected(source_attr, dest_attr):
-                        pm.connectAttr(source_attr, dest_attr)
+                        pm.connectAttr(source_attr, dest_attr, force=False)
                         self._track_created_connection(source_attr, dest_attr)
                     
                     # Create reverse connection from driver to control
                     source_attr = f"{driver_node}.message"
                     dest_attr = f"{control}.{reverse_attr_name}"
                     if not pm.isConnected(source_attr, dest_attr):
-                        pm.connectAttr(source_attr, dest_attr)
+                        pm.connectAttr(source_attr, dest_attr, force=False)
                         self._track_created_connection(source_attr, dest_attr)
+                    
+                    # Increment index for next control (only if connection successful)
+                    current_index += 1
                         
                 except Exception as e:
                     logger.warning(f"Failed to create metadata connection for control {control}: {e}")
             
-            logger.info(f"Created metadata connections for {len(control_nodes)} facial controls.")
+            new_connections_count = current_index - next_available_index
+            if new_connections_count > 0:
+                logger.info(f"Created metadata connections for {new_connections_count} new facial controls.")
+            if skipped_count > 0:
+                logger.info(f"Skipped {skipped_count} controls (already connected).")
+            if new_connections_count == 0 and skipped_count == 0:
+                logger.debug("No new metadata connections needed.")
             
         except Exception as e:
             logger.error(f"Error creating metadata connections: {e}")
