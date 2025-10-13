@@ -1,0 +1,178 @@
+{
+  "test_poses": {
+    "L_Eyebrow_CTRL_ty_10": {
+      "name": "L_Eyebrow_CTRL_ty_10",
+      "attribute_name": "L_Eyebrow_CTRL_ty_10",
+      "description": "Left eyebrow raised to maximum",
+      "timestamp": "2025-10-12T10:00:00",
+      "maya_version": "2025",
+      "controls": {
+        "L_Eyebrow_CTRL": {
+          "translateY": 10.0
+        }
+      }
+    },
+    "L_Eyebrow_CTRL_ty_minus_10": {
+      "name": "L_Eyebrow_CTRL_ty_minus_10",
+      "attribute_name": "L_Eyebrow_CTRL_ty_minus_10",
+      "description": "Left eyebrow lowered to minimum",
+      "timestamp": "2025-10-12T10:00:01",
+      "maya_version": "2025",
+      "controls": {
+        "L_Eyebrow_CTRL": {
+          "translateY": -10.0
+        }
+      }
+    },
+    "R_Eyebrow_CTRL_ty_10": {
+      "name": "R_Eyebrow_CTRL_ty_10",
+      "attribute_name": "R_Eyebrow_CTRL_ty_10",
+      "description": "Right eyebrow raised to maximum",
+      "timestamp": "2025-10-12T10:00:02",
+      "maya_version": "2025",
+      "controls": {
+        "R_Eyebrow_CTRL": {
+          "translateY": 10.0
+        }
+      }
+    },
+    "R_Eyebrow_CTRL_ty_minus_10": {
+      "name": "R_Eyebrow_CTRL_ty_minus_10",
+      "attribute_name": "R_Eyebrow_CTRL_ty_minus_10",
+      "description": "Right eyebrow lowered to minimum",
+      "timestamp": "2025-10-12T10:00:03",
+      "maya_version": "2025",
+      "controls": {
+        "R_Eyebrow_CTRL": {
+          "translateY": -10.0
+        }
+      }
+    },
+    "mouth_CTRL_tz_5": {
+      "name": "mouth_CTRL_tz_5",
+      "attribute_name": "mouth_CTRL_tz_5",
+      "description": "Mouth forward to maximum",
+      "timestamp": "2025-10-12T10:00:04",
+      "maya_version": "2025",
+      "controls": {
+        "mouth_CTRL": {
+          "translateZ": 5.0
+        }
+      }
+    },
+    "mouth_CTRL_tz_minus_5": {
+      "name": "mouth_CTRL_tz_minus_5",
+      "attribute_name": "mouth_CTRL_tz_minus_5",
+      "description": "Mouth backward to minimum",
+      "timestamp": "2025-10-12T10:00:05",
+      "maya_version": "2025",
+      "controls": {
+        "mouth_CTRL": {
+          "translateZ": -5.0
+        }
+      }
+    }
+  },
+  "test_controls": {
+    "L_Eyebrow_CTRL": {
+      "name": "L_Eyebrow_CTRL",
+      "type": "transform",
+      "attributes": {
+        "translateX": {"min": -5.0, "max": 5.0, "default": 0.0},
+        "translateY": {"min": -10.0, "max": 10.0, "default": 0.0},
+        "translateZ": {"min": -3.0, "max": 3.0, "default": 0.0},
+        "rotateX": {"min": -45.0, "max": 45.0, "default": 0.0},
+        "rotateY": {"min": -30.0, "max": 30.0, "default": 0.0},
+        "rotateZ": {"min": -20.0, "max": 20.0, "default": 0.0}
+      }
+    },
+    "R_Eyebrow_CTRL": {
+      "name": "R_Eyebrow_CTRL",
+      "type": "transform",
+      "attributes": {
+        "translateX": {"min": -5.0, "max": 5.0, "default": 0.0},
+        "translateY": {"min": -10.0, "max": 10.0, "default": 0.0},
+        "translateZ": {"min": -3.0, "max": 3.0, "default": 0.0},
+        "rotateX": {"min": -45.0, "max": 45.0, "default": 0.0},
+        "rotateY": {"min": -30.0, "max": 30.0, "default": 0.0},
+        "rotateZ": {"min": -20.0, "max": 20.0, "default": 0.0}
+      }
+    },
+    "mouth_CTRL": {
+      "name": "mouth_CTRL",
+      "type": "transform",
+      "attributes": {
+        "translateX": {"min": -2.0, "max": 2.0, "default": 0.0},
+        "translateY": {"min": -3.0, "max": 3.0, "default": 0.0},
+        "translateZ": {"min": -5.0, "max": 5.0, "default": 0.0},
+        "rotateX": {"min": -30.0, "max": 30.0, "default": 0.0},
+        "rotateY": {"min": -15.0, "max": 15.0, "default": 0.0},
+        "rotateZ": {"min": -10.0, "max": 10.0, "default": 0.0},
+        "scaleX": {"min": 0.5, "max": 2.0, "default": 1.0},
+        "scaleY": {"min": 0.5, "max": 2.0, "default": 1.0},
+        "scaleZ": {"min": 0.5, "max": 2.0, "default": 1.0}
+      }
+    }
+  },
+  "test_export_scenarios": {
+    "basic_export": {
+      "description": "Basic export with 6 poses",
+      "pose_count": 6,
+      "expected_fbx_frames": 6,
+      "expected_text_lines": 6,
+      "facial_bones": ["head_JNT", "jaw_JNT", "mouth_JNT"],
+      "export_settings": {
+        "file_path": "test_basic.fbx",
+        "overwrite_existing": false,
+        "show_progress": true
+      }
+    },
+    "large_export": {
+      "description": "Large export with 50 poses",
+      "pose_count": 50,
+      "expected_fbx_frames": 50,
+      "expected_text_lines": 50,
+      "facial_bones": ["head_JNT", "jaw_JNT", "mouth_JNT", "eye_L_JNT", "eye_R_JNT"],
+      "export_settings": {
+        "file_path": "test_large.fbx",
+        "overwrite_existing": false,
+        "show_progress": true
+      }
+    }
+  },
+  "test_ui_states": {
+    "initial_state": {
+      "current_driver": null,
+      "selected_pose": null,
+      "preview_cache": {},
+      "export_settings": null,
+      "pose_list_count": 1,
+      "pose_list_message": "No poses available. Register controls first."
+    },
+    "after_registration": {
+      "current_driver": "FacialPoseValue",
+      "selected_pose": null,
+      "preview_cache": {},
+      "export_settings": null,
+      "pose_list_count": 6,
+      "pose_list_items": [
+        "L_Eyebrow_CTRL_ty_10",
+        "L_Eyebrow_CTRL_ty_minus_10",
+        "mouth_CTRL_tz_5",
+        "mouth_CTRL_tz_minus_5",
+        "R_Eyebrow_CTRL_ty_10",
+        "R_Eyebrow_CTRL_ty_minus_10"
+      ]
+    },
+    "pose_selected": {
+      "current_driver": "FacialPoseValue",
+      "selected_pose": "L_Eyebrow_CTRL_ty_10",
+      "preview_cache": {
+        "L_Eyebrow_CTRL_ty_10": "cached_pixmap_data"
+      },
+      "export_settings": null,
+      "pose_list_count": 6,
+      "preview_displayed": true
+    }
+  }
+}
