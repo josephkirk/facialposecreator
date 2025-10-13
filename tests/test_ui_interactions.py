@@ -21,6 +21,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from conftest import qapp, mock_maya, mock_animator, ui_fixture, sample_pose_data, sample_control_selection
 from facialposecreator import facial_pose_creator
 
+# QMessageBox constants for testing
+QMessageBox_Yes = 1
+QMessageBox_No = 0
+
 
 class TestRegisterButtonValidation:
     """Test cases for register button validation logic."""
@@ -366,6 +370,162 @@ class TestMayaIntegration:
         # Execute: Click pose in list
         # Verify: Control transforms to pose values
         pytest.skip("Maya integration test - requires Maya environment")
+
+
+class TestExportButtonValidation:
+    """Test cases for export button validation logic."""
+
+    def test_export_button_no_poses_registered(self, ui_fixture, mock_maya):
+        """Test export button with no poses registered."""
+        # Setup
+        ui = ui_fixture
+
+        # Mock QMessageBox.warning to capture calls
+        with patch('facialposecreator.facial_pose_creator.QMessageBox.warning') as mock_warning, \
+             patch('facialposecreator.facial_pose_creator.MAYA_AVAILABLE', True):
+            # Execute
+            ui.export_poses_btn.click()
+
+            # Verify
+            mock_warning.assert_called_once()
+            args, kwargs = mock_warning.call_args
+            assert "No Poses" in args[1]  # title
+            assert "no poses registered" in args[2]  # message
+
+    def test_export_button_no_file_path_selected(self, ui_fixture, mock_maya, mock_animator):
+        """Test export button with poses registered but no file path selected."""
+        # Setup
+        ui = ui_fixture
+        ui.state.current_driver = MagicMock()
+        
+        # Mock poses available
+        mock_animator.saved_poses = {'pose1': MagicMock(), 'pose2': MagicMock()}
+        
+        # Mock QFileDialog.getSaveFileName to return empty path
+        with patch('facialposecreator.facial_pose_creator.QFileDialog.getSaveFileName', return_value=('', '')), \
+             patch('facialposecreator.facial_pose_creator.MAYA_AVAILABLE', True):
+            # Execute
+            ui.export_poses_btn.click()
+
+            # Verify - should not proceed without file path
+            # (The actual export logic would be tested separately)
+
+    def test_export_button_invalid_file_path(self, ui_fixture, mock_maya, mock_animator):
+        """Test export button with invalid file path."""
+        # Setup
+        ui = ui_fixture
+        ui.state.current_driver = MagicMock()
+        
+        # Mock poses available
+        mock_animator.saved_poses = {'pose1': MagicMock(), 'pose2': MagicMock()}
+        
+        # Mock QFileDialog.getSaveFileName to return invalid path
+        invalid_path = 'Z:\\nonexistent\\drive\\file.fbx'
+        with patch('facialposecreator.facial_pose_creator.QFileDialog.getSaveFileName', return_value=(invalid_path, 'FBX Files (*.fbx)')), \
+             patch('facialposecreator.facial_pose_creator.MAYA_AVAILABLE', True), \
+             patch('facialposecreator.facial_pose_creator.QMessageBox.critical') as mock_critical:
+            # Execute
+            ui.export_poses_btn.click()
+
+            # Verify error dialog shown
+            mock_critical.assert_called_once()
+            args, kwargs = mock_critical.call_args
+            assert "Export Failed" in args[1]  # title
+            assert "invalid" in args[2].lower() or "path" in args[2].lower()  # message
+
+    def test_export_button_file_already_exists_no_overwrite(self, ui_fixture, mock_maya, mock_animator):
+        """Test export button when file exists and user chooses not to overwrite."""
+        # Setup
+        ui = ui_fixture
+        ui.state.current_driver = MagicMock()
+        
+        # Mock poses available
+        mock_animator.saved_poses = {'pose1': MagicMock(), 'pose2': MagicMock()}
+        
+        # Mock file exists and user cancels overwrite
+        existing_file = 'C:\\test\\export.fbx'
+        with patch('facialposecreator.facial_pose_creator.QFileDialog.getSaveFileName', return_value=(existing_file, 'FBX Files (*.fbx)')), \
+             patch('facialposecreator.facial_pose_creator.os.path.exists', return_value=True), \
+             patch('facialposecreator.facial_pose_creator.QMessageBox.question', return_value=QMessageBox_No), \
+             patch('facialposecreator.facial_pose_creator.MAYA_AVAILABLE', True):
+            # Execute
+            ui.export_poses_btn.click()
+
+            # Verify - should not proceed with export
+            # (The export logic should be cancelled)
+
+    def test_export_button_successful_validation(self, ui_fixture, mock_maya, mock_animator):
+        """Test export button with valid setup proceeds to export."""
+        # Setup
+        ui = ui_fixture
+        ui.state.current_driver = MagicMock()
+        
+        # Mock poses available
+        mock_animator.saved_poses = {'pose1': MagicMock(), 'pose2': MagicMock()}
+        
+        # Mock successful file selection and export
+        export_file = 'C:\\test\\export.fbx'
+        with patch('facialposecreator.facial_pose_creator.QFileDialog.getSaveFileName', return_value=(export_file, 'FBX Files (*.fbx)')), \
+             patch('facialposecreator.facial_pose_creator.os.path.exists', return_value=False), \
+             patch('facialposecreator.facial_pose_creator.MAYA_AVAILABLE', True), \
+             patch.object(ui, 'perform_fbx_export') as mock_export:
+            # Execute
+            ui.export_poses_btn.click()
+
+            # Verify export method called
+            mock_export.assert_called_once_with(export_file, ['pose1', 'pose2'])
+
+
+class TestFBXExportIntegration:
+    """Integration tests for FBX export workflow."""
+
+    def test_fbx_export_method_exists(self, mock_animator):
+        """Test that the FBX export method exists on the animator."""
+        # Verify the method exists
+        assert hasattr(mock_animator, 'export_poses_to_fbx')
+        assert callable(getattr(mock_animator, 'export_poses_to_fbx'))
+
+    def test_fbx_export_with_no_poses_raises_error(self, mock_animator):
+        """Test FBX export with no poses raises appropriate error."""
+        mock_animator.saved_poses = {}
+        
+        with pytest.raises(Exception) as exc_info:
+            mock_animator.export_poses_to_fbx("test.fbx")
+        
+        assert "No poses found" in str(exc_info.value)
+
+    def test_fbx_export_with_valid_poses_calls_methods(self, mock_animator, monkeypatch):
+        """Test FBX export workflow calls expected methods."""
+        # Setup mock poses
+        mock_animator.saved_poses = {'pose1': MagicMock(), 'pose2': MagicMock()}
+        
+        # Mock the helper methods
+        mock_get_bones = MagicMock(return_value=['bone1', 'bone2'])
+        mock_clear_anim = MagicMock()
+        mock_gen_mapping = MagicMock()
+        mock_export_fbx = MagicMock()
+        
+        monkeypatch.setattr(mock_animator, '_get_facial_bones_for_export', mock_get_bones)
+        monkeypatch.setattr(mock_animator, '_clear_animation_on_bones', mock_clear_anim)
+        monkeypatch.setattr(mock_animator, '_generate_pose_mapping_file', mock_gen_mapping)
+        monkeypatch.setattr(mock_animator, '_export_fbx_animation', mock_export_fbx)
+        
+        # Mock PyMEL functions
+        mock_pm = MagicMock()
+        monkeypatch.setattr('facialposecreator.facial_pose_animator.pm', mock_pm)
+        
+        # Execute
+        mock_animator.export_poses_to_fbx("test.fbx", ['pose1', 'pose2'])
+        
+        # Verify calls
+        mock_get_bones.assert_called_once()
+        mock_clear_anim.assert_called_once_with(['bone1', 'bone2'])
+        mock_gen_mapping.assert_called_once_with("test.fbx", ['pose1', 'pose2'])
+        mock_export_fbx.assert_called_once()
+        
+        # Verify PyMEL timeline setup
+        mock_pm.playbackOptions.assert_called_once_with(min=0, max=1)
+        assert mock_pm.currentTime.call_count >= 2  # Called for each frame
 
 
 if __name__ == '__main__':

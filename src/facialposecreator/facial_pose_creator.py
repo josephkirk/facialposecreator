@@ -21,6 +21,7 @@ Changes (October 7, 2025):
 """
 
 import sys
+import os
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field
 
@@ -624,6 +625,11 @@ class FacialPoseCreatorUI(QMainWindow):
         self.save_poses_btn = QPushButton("Save to File")
         self.save_poses_btn.clicked.connect(self.save_poses_to_file)
         file_buttons_layout.addWidget(self.save_poses_btn)
+        
+        self.export_poses_btn = QPushButton("Export FBX")
+        self.export_poses_btn.clicked.connect(self.export_poses_to_fbx)
+        self.export_poses_btn.setToolTip("Export all registered poses as FBX animation file with frame mapping")
+        file_buttons_layout.addWidget(self.export_poses_btn)
         
         file_layout.addLayout(file_buttons_layout)
         file_group.setLayout(file_layout)
@@ -1451,369 +1457,77 @@ class FacialPoseCreatorUI(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to save poses: {str(e)}")
             self.log_message(f"ERROR: {str(e)}")
     
-    def get_driver_info(self):
-        """Get information about the driver node."""
+    def export_poses_to_fbx(self):
+        """Export poses to FBX animation file with frame mapping."""
         if not self.animator:
             QMessageBox.warning(self, "Error", "Animator not initialized.")
             return
         
-        try:
-            info = self.animator.get_driver_metadata_info()
-            
-            info_text = f"Driver Node: {info.get('driver_node', 'N/A')}\n"
-            info_text += f"Exists: {info.get('exists', False)}\n"
-            info_text += f"Connected Controls: {info.get('connected_controls_count', 0)}\n"
-            info_text += f"Pose Attributes: {info.get('pose_attributes_count', 0)}\n\n"
-            
-            if info.get('connected_controls'):
-                info_text += "Connected Controls:\n"
-                for control in info['connected_controls']:
-                    info_text += f"  - {control}\n"
-            
-            self.driver_info_text.setPlainText(info_text)
-            self.log_message("Retrieved driver information.")
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to get driver info: {str(e)}")
-            self.log_message(f"ERROR: {str(e)}")
-    
-    def refresh_driver_attributes(self):
-        """Refresh the list of driver attributes."""
-        if not self.animator:
+        # Check if poses are registered
+        if not self.animator.saved_poses:
+            QMessageBox.warning(self, "No Poses", "No poses registered. Please register controls first.")
             return
         
-        try:
-            info = self.animator.get_driver_metadata_info()
-            self.driver_attrs_list.clear()
-            
-            for attr in info.get('pose_attributes', []):
-                self.driver_attrs_list.addItem(attr)
-            
-            self.log_message(f"Refreshed driver attributes: {len(info.get('pose_attributes', []))} attributes.")
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to refresh attributes: {str(e)}")
-            self.log_message(f"ERROR: {str(e)}")
-    
-    def register_selected_control_to_driver(self):
-        """Handle register button click with validation."""
-        logger.debug("Register button clicked")
-        
-        try:
-            # 1. Get selection using safe API
-            # For now, we'll use a simple check - in real Maya this would use pm.selected()
-            if not MAYA_AVAILABLE:
-                self.show_error("Error", "Maya not available for selection.")
-                return
-            
-            # Mock selection for testing - in real Maya we'd use pm.selected()
-            controls = self._get_selected_controls()
-            
-            # 2. Validate non-empty
-            if not controls:
-                logger.warning("No controls selected for registration")
-                QMessageBox.warning(
-                    self, "No Selection",
-                    "Please select at least one facial control."
-                )
-                return
-            
-            # 3. Validate controls are transform nodes
-            valid_controls = self._validate_controls(controls)
-            if not valid_controls:
-                return  # Error already shown
-            
-            # 4. Prompt for driver name if needed
-            driver_name = self._get_or_prompt_driver_name()
-            
-            # 5. Call safe API
-            if not hasattr(__builtins__, 'safe_create_driver') and facial_pose_animator is None:
-                # For testing when facial_pose_animator is not available
-                driver = None
-            else:
-                driver = safe_create_driver(driver_name, valid_controls)
-            
-            if not driver:
-                self.show_error(
-                    "Registration Failed",
-                    "Failed to create driver node. Check script editor for details."
-                )
-                return
-            
-            # 6. Update UI
-            self.state.current_driver = driver
-            self.refresh_pose_list()
-            
-            # 7. Show success
-            pose_count = len(valid_controls) * 2  # Approximate
-            self.show_success(
-                "Success",
-                f"Registered {pose_count} poses from {len(valid_controls)} controls."
-            )
-            logger.info(f"Registered {len(valid_controls)} controls to driver {driver_name}")
-            
-        except Exception as e:
-            logger.exception("Unexpected error during registration")
-            self.show_error(
-                "Unexpected Error",
-                f"An unexpected error occurred: {e}\n\nCheck script editor for details."
-            )
-    
-    def _get_selected_controls(self) -> List[Any]:
-        """Get currently selected controls from Maya.
-        
-        Returns:
-            List of selected PyMEL objects
-        """
-        try:
-            import pymel.core as pm
-            return pm.selected()
-        except ImportError:
-            # For testing when pymel not available
-            return []
-    
-    def _validate_controls(self, controls: List[Any]) -> List[Any]:
-        """Validate controls are transform nodes.
-        
-        Returns:
-            List of valid controls, or empty list if validation fails
-        """
-        valid_controls = []
-        invalid_nodes = []
-        
-        for ctrl in controls:
-            if ctrl.nodeType() == 'transform':
-                valid_controls.append(ctrl)
-            else:
-                invalid_nodes.append(ctrl.name())
-        
-        if invalid_nodes:
-            logger.warning(f"Invalid nodes filtered: {invalid_nodes}")
-            QMessageBox.warning(
-                self, "Invalid Selection",
-                f"Selected objects must be transform nodes.\n\nInvalid: {', '.join(invalid_nodes)}"
-            )
-            return []
-        
-        return valid_controls
-    
-    def _get_or_prompt_driver_name(self) -> str:
-        """Get driver name from UI or prompt user."""
-        # For now, use default name - can be enhanced later
-        return "FacialPoseValue"
-    
-    def refresh_pose_list(self):
-        """Refresh pose list from current driver node."""
-        logger.debug("Refreshing pose list")
-        self.poses_list.clear()
-        
-        if not self.state.current_driver:
-            # No driver yet
-            self.poses_list.addItem("No poses available. Register controls first.")
-            return
-        
-        # Get poses from driver
-        poses = self.animator.get_all_poses(self.state.current_driver)
-        
-        if not poses:
-            self.poses_list.addItem("No poses registered. Register controls first.")
-            return
-        
-        # Sort alphabetically
-        poses.sort()
-        
-        # Add to list
-        for pose_name in poses:
-            self.poses_list.addItem(pose_name)
-        
-        # Select first by default
-        if poses:
-            self.pose_list.setCurrentRow(0)
-        
-        logger.info(f"Pose list refreshed: {len(poses)} poses")
-    
-    def test_driver_attribute(self):
-        """Test the selected driver attribute."""
-        current_item = self.driver_attrs_list.currentItem()
-        if not current_item:
-            QMessageBox.warning(self, "Warning", "Please select an attribute to test.")
-            return
-        
-        attr_name = current_item.text()
-        self.log_message(f"Testing attribute: {attr_name}")
-        QMessageBox.information(self, "Info", f"Testing feature for attribute '{attr_name}' is not yet implemented.")
-    
-    def add_limit_mapping(self):
-        """Add a new limit mapping row."""
-        row = self.limits_table.rowCount()
-        self.limits_table.insertRow(row)
-        self.limits_table.setItem(row, 0, QTableWidgetItem(""))
-        self.limits_table.setItem(row, 1, QTableWidgetItem(""))
-        self.log_message("Added new limit mapping row. Enter attribute name and query type (e.g., 'tx', 'ty', 'tz', 'rx', 'ry', 'rz').")
-    
-    def remove_limit_mapping(self):
-        """Remove the selected limit mapping row."""
-        current_row = self.limits_table.currentRow()
-        if current_row >= 0:
-            attr_name = self.limits_table.item(current_row, 0).text() if self.limits_table.item(current_row, 0) else ""
-            self.limits_table.removeRow(current_row)
-            self.log_message(f"Removed limit mapping for: {attr_name if attr_name else 'empty row'}")
-        else:
-            QMessageBox.warning(self, "Warning", "Please select a row to remove.")
-    
-    def add_custom_limit(self):
-        """Add a new custom limit row."""
-        row = self.custom_limits_table.rowCount()
-        self.custom_limits_table.insertRow(row)
-        self.custom_limits_table.setItem(row, 0, QTableWidgetItem(""))
-        self.custom_limits_table.setItem(row, 1, QTableWidgetItem("0.0"))
-        self.custom_limits_table.setItem(row, 2, QTableWidgetItem("1.0"))
-        self.log_message("Added new custom limit row. Enter attribute name, min value, and max value.")
-    
-    def remove_custom_limit(self):
-        """Remove the selected custom limit row."""
-        current_row = self.custom_limits_table.currentRow()
-        if current_row >= 0:
-            attr_name = self.custom_limits_table.item(current_row, 0).text() if self.custom_limits_table.item(current_row, 0) else ""
-            self.custom_limits_table.removeRow(current_row)
-            self.log_message(f"Removed custom limit for: {attr_name if attr_name else 'empty row'}")
-        else:
-            QMessageBox.warning(self, "Warning", "Please select a row to remove.")
-    
-    def clear_custom_limits(self):
-        """Clear all custom limit rows."""
-        reply = QMessageBox.question(
-            self, "Confirm Clear",
-            "Are you sure you want to clear all custom limits?",
-            QMessageBox.Yes | QMessageBox.No
+        # Get export file path
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Export FBX Animation", "", "FBX Files (*.fbx);;All Files (*)"
         )
         
-        if reply == QMessageBox.Yes:
-            self.custom_limits_table.setRowCount(0)
-            self.log_message("Cleared all custom limits from table.")
-    
-    def apply_settings(self):
-        """Apply the current settings to the animator."""
-        if not self.animator:
-            QMessageBox.warning(self, "Error", "Animator not initialized.")
+        if not file_path:
             return
         
+        # Check if file already exists
+        if os.path.exists(file_path):
+            reply = QMessageBox.question(
+                self, "File Exists", 
+                f"The file '{os.path.basename(file_path)}' already exists.\nDo you want to overwrite it?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            )
+            if reply == QMessageBox.No:
+                return
+        
         try:
-            # Update tolerance
-            self.animator.tolerance = self.tolerance_spinbox.value()
+            # Get all pose names
+            pose_names = list(self.animator.saved_poses.keys())
             
-            # Update undo tracking
-            self.animator.set_undo_tracking(self.undo_tracking_check.isChecked())
-            
-            # Update excluded nodes
-            excluded_nodes = [
-                node.strip() for node in self.excluded_nodes_edit.toPlainText().split('\n')
-                if node.strip()
-            ]
-            self.animator.excluded_nodes = excluded_nodes
-            
-            # Update excluded attributes
-            excluded_attrs = [
-                attr.strip() for attr in self.excluded_attrs_edit.toPlainText().split('\n')
-                if attr.strip()
-            ]
-            self.animator.excluded_attributes = excluded_attrs
-            
-            # Update transform limit type map
-            limit_mappings = {}
-            
-            for row in range(self.limits_table.rowCount()):
-                attr_item = self.limits_table.item(row, 0)
-                query_item = self.limits_table.item(row, 1)
-                
-                if attr_item and query_item:
-                    attr_name = attr_item.text().strip()
-                    query_type = query_item.text().strip()
-                    
-                    if attr_name and query_type:
-                        limit_mappings[attr_name] = query_type
-            
-            # Use the animator's method to update the limit type map if available
-            if hasattr(self.animator, 'update_limit_type_map'):
-                results = self.animator.update_limit_type_map(limit_mappings)
-                
-                # Log results
-                failed_mappings = [attr for attr, success in results.items() if not success]
-                if failed_mappings:
-                    self.log_message(f"WARNING: Invalid mappings for: {', '.join(failed_mappings)}")
-                
-                success_count = sum(1 for success in results.values() if success)
-                self.log_message(f"Updated limit type map with {success_count} mappings.")
-            else:
-                # Fallback: directly update the limit_type_map (older version)
-                self.log_message("Note: Using older animator version. Please reload the module for full functionality.")
-                # We can't easily update lambdas without the helper method, so just log a warning
-                self.log_message("WARNING: Limit type map updates require reloading the facial_pose_animator module.")
-            
-            # Update custom limit overrides (if available)
-            if hasattr(self.animator, 'clear_custom_limits') and hasattr(self.animator, 'set_custom_limit'):
-                self.animator.clear_custom_limits()
-                custom_limits_count = 0
-                custom_limits_errors = []
-                
-                for row in range(self.custom_limits_table.rowCount()):
-                    attr_item = self.custom_limits_table.item(row, 0)
-                    min_item = self.custom_limits_table.item(row, 1)
-                    max_item = self.custom_limits_table.item(row, 2)
-                    
-                    if attr_item and min_item and max_item:
-                        attr_name = attr_item.text().strip()
-                        
-                        if attr_name:
-                            try:
-                                min_value = float(min_item.text().strip())
-                                max_value = float(max_item.text().strip())
-                                
-                                self.animator.set_custom_limit(attr_name, min_value, max_value)
-                                custom_limits_count += 1
-                            except ValueError as ve:
-                                custom_limits_errors.append(f"{attr_name}: {str(ve)}")
-                
-                if custom_limits_count > 0:
-                    self.log_message(f"Applied {custom_limits_count} custom limit override(s).")
-                
-                if custom_limits_errors:
-                    error_msg = "Custom limit errors:\n" + "\n".join(custom_limits_errors)
-                    self.log_message(f"WARNING: {error_msg}")
-                    QMessageBox.warning(self, "Custom Limit Errors", error_msg)
-            else:
-                # Custom limits feature not available
-                if self.custom_limits_table.rowCount() > 0:
-                    self.log_message("WARNING: Custom limits feature requires reloading the facial_pose_animator module.")
-            
-            self.log_message("Settings applied successfully.")
-            QMessageBox.information(self, "Success", "Settings applied successfully.")
+            # Perform FBX export
+            self.perform_fbx_export(file_path, pose_names)
             
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to apply settings: {str(e)}")
-            self.log_message(f"ERROR: {str(e)}")
-
-
-def show_ui():
-    """Show the Facial Pose Creator UI."""
-    # Check if QApplication instance exists
-    app = QApplication.instance()
-    created_app = False
-    if app is None:
-        app = QApplication(sys.argv)
-        created_app = True
+            QMessageBox.critical(self, "Export Failed", f"Failed to export FBX: {str(e)}")
+            self.log_message(f"ERROR: FBX export failed: {str(e)}")
     
-    # Create and show the main window
-    window = FacialPoseCreatorUI(app)
-    window.show()
-    
-    # Only start event loop if we created the QApplication (running standalone)
-    # If QApplication already existed (e.g., running in Maya), don't start event loop
-    if created_app:
-        sys.exit(app.exec_())
-    
-    return window
-
-
-if __name__ == "__main__":
-    show_ui()
+    def perform_fbx_export(self, file_path: str, pose_names: List[str]):
+        """
+        Perform the actual FBX export with progress tracking.
+        
+        Args:
+            file_path: Path to save the FBX file
+            pose_names: List of pose names to export
+        """
+        try:
+            self.log_message(f"Starting FBX export: {len(pose_names)} poses to {file_path}")
+            
+            # Show progress
+            self.statusBar().showMessage(f"Exporting {len(pose_names)} poses...")
+            
+            # Call the animator's FBX export method
+            if self.animator:
+                self.animator.export_poses_to_fbx(file_path, pose_names)
+            else:
+                raise RuntimeError("Animator not available")
+            
+            self.log_message(f"FBX export completed successfully")
+            
+            QMessageBox.information(
+                self, "Export Complete", 
+                f"Successfully exported {len(pose_names)} poses to FBX.\n"
+                f"File: {file_path}\n"
+                f"Text mapping file: {os.path.splitext(file_path)[0]}.txt"
+            )
+            
+            self.statusBar().showMessage("Export complete")
+            
+        except Exception as e:
+            self.statusBar().showMessage("Export failed")
+            raise e

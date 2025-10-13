@@ -1209,7 +1209,7 @@ class FacialPoseAnimator:
             mode: Selection mode (PATTERN, SELECTION, or OBJECT_SET)
             object_set_name: Name of Maya object set to use (when mode is OBJECT_SET)
             use_selection: Legacy parameter for backward compatibility
-            
+        
         Raises:
             ControlSelectionError: If no valid controls can be found
             InvalidAttributeError: If attribute operations fail
@@ -2425,12 +2425,14 @@ class FacialPoseAnimator:
         try:
             # Determine which poses to export
             if pose_names is None:
-                poses_to_export = self.saved_poses
+                poses_to_export = list(self.saved_poses.keys())
             else:
-                poses_to_export = {name: self.saved_poses[name] for name in pose_names if name in self.saved_poses}
+                poses_to_export = [name for name in pose_names if name in self.saved_poses]
             
             if not poses_to_export:
                 raise PoseDataError("No poses found to export.")
+            
+            logger.info(f"Starting export: {len(poses_to_export)} poses to {file_path}")
             
             # Prepare export data
             from datetime import datetime
@@ -2440,7 +2442,7 @@ class FacialPoseAnimator:
                 'maya_version': pm.about(version=True),
                 'facial_driver_node': self.facial_driver_node,
                 'control_pattern': self.control_pattern,
-                'poses': {name: pose.to_dict() for name, pose in poses_to_export.items()}
+                'poses': {name: pose.to_dict() for name, pose in self.saved_poses.items() if name in poses_to_export}
             }
             
             # Create directory if it doesn't exist
@@ -2452,16 +2454,215 @@ class FacialPoseAnimator:
             with open(file_path, 'w') as f:
                 json.dump(export_data, f, indent=2)
             
-            self.pose_storage_file = file_path
-            logger.info(f"Exported {len(poses_to_export)} poses to: {file_path}")
+            logger.info(f"Successfully exported {len(poses_to_export)} poses to: {file_path}")
             
         except (OSError, IOError, PermissionError) as e:
             raise FileOperationError(f"Failed to write poses to file '{file_path}': {e}") from e
         except (ValueError, TypeError) as e:  # JSONEncodeError is a subclass of ValueError
             raise PoseDataError(f"Failed to serialize pose data: {e}") from e
-        except Exception as e:
-            raise PoseDataError(f"Unexpected error exporting poses: {e}") from e
     
+    def export_poses_to_fbx(self, file_path: str, pose_names: Optional[List[str]] = None, 
+                           facial_bones: Optional[List[str]] = None) -> None:
+        """
+        Export saved poses as FBX animation file with frame-to-pose mapping.
+        
+        This method creates an FBX animation where each pose is keyed on consecutive frames,
+        and generates a text file mapping pose names to frame numbers for Unreal Engine import.
+        
+        Args:
+            file_path: Path to save the FBX file (without extension)
+            pose_names: Optional list of specific pose names to export (exports all if None)
+            facial_bones: Optional list of facial bone names to include in export
+            
+        Raises:
+            PoseDataError: If no poses available or export fails
+            FileOperationError: If file operations fail
+        """
+        try:
+            # Determine which poses to export
+            if pose_names is None:
+                poses_to_export = list(self.saved_poses.keys())
+            else:
+                poses_to_export = [name for name in pose_names if name in self.saved_poses]
+            
+            if not poses_to_export:
+                raise PoseDataError("No poses found to export.")
+            
+            logger.info(f"Starting FBX export: {len(poses_to_export)} poses to {file_path}")
+            
+            # Set up animation timeline
+            import pymel.core as pm
+            
+            # Store current time for restoration
+            current_time = pm.currentTime()
+            
+            # Set timeline range
+            start_frame = 0
+            end_frame = len(poses_to_export) - 1
+            pm.playbackOptions(min=start_frame, max=end_frame)
+            
+            # Get facial bones to export (use selection if not specified)
+            if facial_bones is None:
+                facial_bones = self._get_facial_bones_for_export()
+            
+            if not facial_bones:
+                raise PoseDataError("No facial bones found for FBX export. Please select facial controls or specify facial_bones parameter.")
+            
+            logger.info(f"Exporting {len(facial_bones)} facial bones: {facial_bones}")
+            
+            # Clear existing animation on facial bones
+            self._clear_animation_on_bones(facial_bones)
+            
+            # Animate each pose on consecutive frames
+            for frame_idx, pose_name in enumerate(poses_to_export):
+                logger.info(f"Animating pose '{pose_name}' on frame {frame_idx}")
+                
+                # Go to frame
+                pm.currentTime(frame_idx)
+                
+                # Apply pose
+                self.animate_pose(pose_name)
+                
+                # Set keyframes on all facial bones
+                pm.setKeyframe(facial_bones)
+            
+            # Generate text mapping file
+            self._generate_pose_mapping_file(file_path, poses_to_export)
+            
+            # Export FBX
+            self._export_fbx_animation(file_path, facial_bones, start_frame, end_frame)
+            
+            # Restore original time
+            pm.currentTime(current_time)
+            
+            logger.info(f"Successfully exported {len(poses_to_export)} poses to FBX: {file_path}.fbx")
+            
+        except Exception as e:
+            logger.error(f"FBX export failed: {e}")
+            raise PoseDataError(f"Failed to export poses to FBX: {e}") from e
+    
+    def _get_facial_bones_for_export(self) -> List[str]:
+        """
+        Get facial bones for FBX export.
+        
+        Returns:
+            List of facial bone names
+        """
+        try:
+            import pymel.core as pm
+            
+            # Try to get selected objects first
+            selection = pm.selected()
+            if selection:
+                # Filter for transform nodes that look like facial bones
+                facial_bones = []
+                for obj in selection:
+                    if hasattr(obj, 'nodeType') and obj.nodeType() == 'transform':
+                        # Check if it has animation channels (likely a bone/control)
+                        if pm.keyframe(obj, query=True, keyframeCount=True) or True:  # Always include for now
+                            facial_bones.append(str(obj))
+                return facial_bones
+            
+            # If no selection, try to find common facial bone patterns
+            all_objects = pm.ls(type='transform')
+            facial_patterns = ['*_facial_*', '*_face_*', '*_head_*', '*_jaw_*', '*_eye*', '*_brow*', '*_nose*', '*_mouth*', '*_lip*']
+            
+            facial_bones = []
+            for obj in all_objects:
+                obj_name = str(obj)
+                for pattern in facial_patterns:
+                    if pm.util.match(pattern, obj_name):
+                        facial_bones.append(obj_name)
+                        break
+            
+            return facial_bones
+            
+        except Exception as e:
+            logger.warning(f"Could not determine facial bones for export: {e}")
+            return []
+    
+    def _clear_animation_on_bones(self, bone_names: List[str]) -> None:
+        """
+        Clear existing animation on specified bones.
+        
+        Args:
+            bone_names: List of bone names to clear animation from
+        """
+        try:
+            import pymel.core as pm
+            
+            for bone_name in bone_names:
+                try:
+                    bone = pm.PyNode(bone_name)
+                    # Clear keyframes on all transform attributes
+                    pm.cutKey(bone, clear=True)
+                except Exception as e:
+                    logger.warning(f"Could not clear animation on {bone_name}: {e}")
+                    
+        except Exception as e:
+            logger.warning(f"Error clearing animation: {e}")
+    
+    def _generate_pose_mapping_file(self, fbx_path: str, pose_names: List[str]) -> None:
+        """
+        Generate text file mapping pose names to frame numbers.
+        
+        Args:
+            fbx_path: Base path for the FBX file
+            pose_names: List of pose names in frame order
+        """
+        try:
+            txt_path = f"{fbx_path}.txt"
+            
+            with open(txt_path, 'w') as f:
+                f.write("# Facial Pose to Frame Mapping\n")
+                f.write("# Generated for Unreal Engine Pose Asset import\n")
+                f.write(f"# Created: {pm.about(version=True)} at {pm.date()}\n")
+                f.write("# Format: Line number = Frame number, Content = Pose name\n\n")
+                
+                for frame_idx, pose_name in enumerate(pose_names):
+                    f.write(f"{pose_name}\n")
+            
+            logger.info(f"Generated pose mapping file: {txt_path}")
+            
+        except Exception as e:
+            logger.error(f"Failed to generate pose mapping file: {e}")
+            raise FileOperationError(f"Could not create pose mapping file: {e}") from e
+    
+    def _export_fbx_animation(self, file_path: str, bone_names: List[str], start_frame: int, end_frame: int) -> None:
+        """
+        Export animation as FBX file.
+        
+        Args:
+            file_path: Base path for the FBX file
+            bone_names: List of bones to export
+            start_frame: Start frame of animation
+            end_frame: End frame of animation
+        """
+        try:
+            import pymel.core as pm
+            
+            fbx_path = f"{file_path}.fbx"
+            
+            # Set FBX export options
+            pm.mel.eval('FBXResetExport')
+            pm.mel.eval('FBXExportAnimationOnly -v true')
+            pm.mel.eval('FBXExportBakeComplexAnimation -v true')
+            pm.mel.eval('FBXExportBakeComplexStart -v {}'.format(start_frame))
+            pm.mel.eval('FBXExportBakeComplexEnd -v {}'.format(end_frame))
+            pm.mel.eval('FBXExportBakeComplexStep -v 1')
+            
+            # Select bones for export
+            pm.select(bone_names, replace=True)
+            
+            # Export FBX
+            pm.mel.eval('FBXExport -f "{}" -s'.format(fbx_path))
+            
+            logger.info(f"Exported FBX animation to: {fbx_path}")
+            
+        except Exception as e:
+            logger.error(f"FBX export failed: {e}")
+            raise FileOperationError(f"Could not export FBX file: {e}") from e
+
     def import_poses_from_file(self, file_path: str, overwrite_existing: bool = False) -> List[str]:
         """
         Import poses from a JSON file.
@@ -2731,8 +2932,8 @@ def create_facial_animator() -> FacialPoseAnimator:
 
 
 def quick_reset_facial_controls(mode: Optional[ControlSelectionMode] = None, 
-                               object_set_name: Optional[str] = None,
-                               use_selection: bool = False) -> bool:
+                            object_set_name: Optional[str] = None,
+                            use_selection: bool = False) -> bool:
     """
     DEPRECATED: Use safe_reset_controls() instead.
     
@@ -2765,9 +2966,9 @@ def quick_reset_facial_controls(mode: Optional[ControlSelectionMode] = None,
 
 
 def quick_animate_facial_poses(output_file: Optional[str] = None, 
-                              mode: Optional[ControlSelectionMode] = None,
-                              object_set_name: Optional[str] = None,
-                              use_selection: bool = False):
+                            mode: Optional[ControlSelectionMode] = None,
+                            object_set_name: Optional[str] = None,
+                            use_selection: bool = False):
     """
     DEPRECATED: Use animate_poses() or safe_animate_poses() instead.
     
@@ -2890,8 +3091,8 @@ def quick_animate_from_set(set_name: str, output_file: Optional[str] = None):
 
 
 def safe_create_pose_driver(mode: Optional[ControlSelectionMode] = None,
-                           object_set_name: Optional[str] = None,
-                           use_selection: bool = False) -> Optional[pm.PyNode]:
+                        object_set_name: Optional[str] = None,
+                        use_selection: bool = False) -> Optional[pm.PyNode]:
     """
     Safely create facial pose driver with automatic cleanup on failure.
     
@@ -2949,7 +3150,7 @@ def get_driver_metadata_info(driver_node_name: Optional[str] = None) -> Dict[str
 
 
 def rebuild_driver_metadata(driver_node_name: Optional[str] = None,
-                           mode: Optional[ControlSelectionMode] = None) -> bool:
+                        mode: Optional[ControlSelectionMode] = None) -> bool:
     """
     Quick function to rebuild metadata connections for a driver node.
     
@@ -2967,9 +3168,9 @@ def rebuild_driver_metadata(driver_node_name: Optional[str] = None,
 # Pose Management Convenience Functions
 
 def save_pose_from_selection(pose_name: str, 
-                           description: str = "", 
-                           auto_save_to_file: bool = True,
-                           output_directory: Optional[str] = None) -> Optional[FacialPoseData]:
+                        description: str = "", 
+                        auto_save_to_file: bool = True,
+                        output_directory: Optional[str] = None) -> Optional[FacialPoseData]:
     """
     DEPRECATED: Use save_pose() or safe_save_pose() instead.
     
@@ -2998,9 +3199,9 @@ def save_pose_from_selection(pose_name: str,
 
 
 def save_pose_from_all_controls(pose_name: str, 
-                              description: str = "", 
-                              auto_save_to_file: bool = True,
-                              output_directory: Optional[str] = None) -> Optional[FacialPoseData]:
+                            description: str = "", 
+                            auto_save_to_file: bool = True,
+                            output_directory: Optional[str] = None) -> Optional[FacialPoseData]:
     """
     DEPRECATED: Use save_pose() or safe_save_pose() instead.
     
@@ -3322,18 +3523,18 @@ def save_and_export_pose(pose_name: str,
 
 
 def quick_pose_workflow_from_selection(pose_name: str, 
-                                     description: str = "", 
-                                     create_driver: bool = True,
-                                     auto_save_individual: bool = True,
-                                     export_to_collection: bool = True,
-                                     output_directory: Optional[str] = None) -> bool:
+                                    description: str = "", 
+                                    create_driver: bool = True,
+                                    auto_save_individual: bool = True,
+                                    export_to_collection: bool = True,
+                                    output_directory: Optional[str] = None) -> bool:
     """
     DEPRECATED: Use complete_pose_workflow() instead.
     
     .. deprecated::
         This function will be removed in version 2.0.
         Use complete_pose_workflow(pose_name, description, use_selection=True, 
-                                   create_driver=create_driver, save_to_file=auto_save_individual)
+                                create_driver=create_driver, save_to_file=auto_save_individual)
     
     Complete workflow: save pose from selection with auto-save, create driver attribute, and optional collection export.
     
@@ -3391,14 +3592,14 @@ def quick_pose_workflow_from_selection(pose_name: str,
 
 
 def quick_animate_from_metadata(driver_node_name: Optional[str] = None,
-                               output_file: Optional[str] = None) -> Optional[List[str]]:
+                            output_file: Optional[str] = None) -> Optional[List[str]]:
     """
     DEPRECATED: Use animate_poses(mode=ControlSelectionMode.METADATA) instead.
     
     .. deprecated::
         This function will be removed in version 2.0.
         Use animate_poses(driver_node=driver_node_name, output_file=output_file, 
-                         mode=ControlSelectionMode.METADATA)
+                        mode=ControlSelectionMode.METADATA)
     
     Quick function to animate poses using controls from driver metadata.
     
@@ -3481,7 +3682,7 @@ def quick_save_pose_to_named_file(pose_name: str,
 
 
 def batch_save_poses_from_selection_states(pose_definitions: List[Tuple[str, str]], 
-                                          output_directory: Optional[str] = None) -> List[str]:
+                                        output_directory: Optional[str] = None) -> List[str]:
     """
     DEPRECATED: This utility function will be removed in version 2.0.
     
@@ -3597,7 +3798,7 @@ def get_pose_files_in_directory(directory: Optional[str] = None) -> List[str]:
 
 
 def load_all_poses_from_directory(directory: Optional[str] = None, 
-                                 overwrite_existing: bool = False) -> List[str]:
+                                overwrite_existing: bool = False) -> List[str]:
     """
     DEPRECATED: This utility function will be removed in version 2.0.
     
@@ -3734,10 +3935,10 @@ def load_all_poses_from_directory(directory: Optional[str] = None,
 # ----------------------------------------------------------------------------
 
 def animate_poses(output_file: Optional[str] = None, 
-                 mode: Optional[ControlSelectionMode] = None,
-                 object_set_name: Optional[str] = None,
-                 driver_node: Optional[pm.PyNode] = None,
-                 **kwargs) -> List[str]:
+                mode: Optional[ControlSelectionMode] = None,
+                object_set_name: Optional[str] = None,
+                driver_node: Optional[pm.PyNode] = None,
+                **kwargs) -> List[str]:
     """
     Animate facial poses using driver node.
     
@@ -3776,8 +3977,8 @@ def animate_poses(output_file: Optional[str] = None,
 
 
 def create_driver(mode: Optional[ControlSelectionMode] = None,
-                 object_set_name: Optional[str] = None,
-                 **kwargs) -> pm.PyNode:
+                object_set_name: Optional[str] = None,
+                **kwargs) -> pm.PyNode:
     """
     Create facial pose driver node.
     
@@ -3808,8 +4009,8 @@ def create_driver(mode: Optional[ControlSelectionMode] = None,
 
 
 def reset_controls(mode: Optional[ControlSelectionMode] = None,
-                  object_set_name: Optional[str] = None,
-                  **kwargs) -> None:
+                object_set_name: Optional[str] = None,
+                **kwargs) -> None:
     """
     Reset all facial controls to default values.
     
@@ -3836,10 +4037,10 @@ def reset_controls(mode: Optional[ControlSelectionMode] = None,
 
 
 def save_pose(pose_name: str,
-             description: str = "",
-             mode: Optional[ControlSelectionMode] = None,
-             save_to_file: bool = True,
-             **kwargs) -> FacialPoseData:
+            description: str = "",
+            mode: Optional[ControlSelectionMode] = None,
+            save_to_file: bool = True,
+            **kwargs) -> FacialPoseData:
     """
     Save a facial pose.
     
@@ -4191,7 +4392,7 @@ def safe_register_selected_to_driver(driver_node_name: Optional[str] = None,
         
         if results['success']:
             summary = f"Registered {results['registered_controls']}/{results['total_controls']} controls " \
-                     f"with {results['total_poses']} total poses"
+                    f"with {results['total_poses']} total poses"
             if results['object_sets_processed']:
                 summary += f" (from {len(results['object_sets_processed'])} object set(s))"
             logger.info(summary)
@@ -4207,7 +4408,7 @@ def safe_register_selected_to_driver(driver_node_name: Optional[str] = None,
 
 # Backward compatibility aliases
 def safe_register_selected_control_to_driver(driver_node_name: Optional[str] = None,
-                                             update_metadata: bool = True) -> Optional[Dict[str, Any]]:
+                                            update_metadata: bool = True) -> Optional[Dict[str, Any]]:
     """
     DEPRECATED: Use safe_register_selected_to_driver() instead.
     
@@ -4462,10 +4663,3 @@ def complete_pose_workflow(
     
     return results
 
-
-# ============================================================================
-# DEPRECATED FUNCTIONS (To be removed in future version)
-# ============================================================================
-# These functions are deprecated and will be removed in version 2.0
-# Please migrate to the unified functions above
-# ============================================================================
